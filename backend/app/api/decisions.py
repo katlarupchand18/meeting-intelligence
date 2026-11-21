@@ -136,6 +136,18 @@ def update_decision(
             detail="Decision not found.",
         )
 
+    if (
+        decision.verification_status in {"approved", "rejected"}
+        and data.model_dump(exclude_unset=True)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This decision has already been reviewed. "
+                "Use the verification endpoint to edit it."
+            ),
+        )
+
     return decision_service.update_decision(
         db,
         decision,

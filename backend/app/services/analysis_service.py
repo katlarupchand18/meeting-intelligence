@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 
 from typing import Any
 from uuid import UUID
@@ -128,7 +129,8 @@ class AnalysisService:
             start=1,
         ):
             try:
-                result = self._analyze_chunk(
+                result = await asyncio.to_thread(
+                    self._analyze_chunk,
                     chunk=chunk,
                     chunk_number=chunk_number,
                     total_chunks=len(chunks),
@@ -155,8 +157,9 @@ class AnalysisService:
         # MERGE RESULTS
         # -----------------------------------------------------
 
-        merged = self._merge_results(
-            chunk_results
+        merged = await asyncio.to_thread(
+            self._merge_results,
+            chunk_results,
         )
 
         # -----------------------------------------------------

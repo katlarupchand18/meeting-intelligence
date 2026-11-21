@@ -1,3 +1,7 @@
+from app.api.transcript_upload import router as transcript_upload_router
+from app.api.people import router as people_router
+from app.api.reminders import router as reminders_router
+from app.api.role_insights import router as role_insights_router
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,10 +14,14 @@ from app.api.commitments import router as commitments_router
 from app.api.decisions import router as decisions_router
 from app.api.evidence import router as evidence_router
 from app.api.memory import router as memory_router
+from app.api.meeting_chat import router as meeting_chat_router
 from app.api.meetings import router as meetings_router
+from app.api.followups import router as followups_router
 from app.api.participants import router as participants_router
 from app.api.transcription import router as transcription_router
+from app.api.transcript_search import router as transcript_search_router
 
+from app.api.verification import router as verification_router
 from app.core.config import settings
 
 
@@ -98,6 +106,9 @@ app.add_middleware(
 # API ROUTES
 # =========================================================
 
+from app.api import meeting_relationships
+app.include_router(reminders_router, prefix=settings.API_V1_PREFIX)
+app.include_router(role_insights_router, prefix=settings.API_V1_PREFIX)
 app.include_router(
     meetings_router,
     prefix=settings.API_V1_PREFIX,
@@ -134,6 +145,16 @@ app.include_router(
 )
 
 app.include_router(
+    meeting_chat_router,
+    prefix=settings.API_V1_PREFIX,
+)
+
+app.include_router(
+    followups_router,
+    prefix=settings.API_V1_PREFIX,
+)
+
+app.include_router(
     accountability_router,
     prefix=settings.API_V1_PREFIX,
 )
@@ -143,6 +164,17 @@ app.include_router(
     prefix=settings.API_V1_PREFIX,
 )
 
+
+
+app.include_router(
+    verification_router,
+    prefix=settings.API_V1_PREFIX,
+)
+
+app.include_router(
+    transcript_search_router,
+    prefix=settings.API_V1_PREFIX,
+)
 
 # =========================================================
 # ROOT
@@ -222,3 +254,8 @@ async def api_info():
                 f"{prefix}/participants",
         },
     }
+app.include_router(people_router, prefix=settings.API_V1_PREFIX)
+
+app.include_router(meeting_relationships.router, prefix='/api')
+
+app.include_router(transcript_upload_router, prefix=settings.API_V1_PREFIX)

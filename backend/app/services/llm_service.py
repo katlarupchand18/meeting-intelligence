@@ -23,6 +23,7 @@ class LLMService:
         self,
         prompt: str,
         system_prompt: str | None = None,
+        json_mode: bool = False,
     ) -> str:
         messages = []
 
@@ -45,7 +46,6 @@ class LLMService:
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "format": "json",
             "think": False,
             "options": {
                 "temperature": 0,
@@ -53,6 +53,9 @@ class LLMService:
                 "num_predict": 2048,
             },
         }
+
+        if json_mode:
+            payload["format"] = "json"
 
         try:
             with httpx.Client(timeout=self.timeout) as client:
@@ -159,6 +162,7 @@ class LLMService:
         content = self._chat(
             prompt=prompt,
             system_prompt=system_prompt,
+            json_mode=True,
         )
 
         cleaned = self._clean_json_response(content)

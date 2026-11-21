@@ -1,5 +1,7 @@
 "use client";
 
+import ReminderBell from "./components/ReminderBell";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -302,56 +304,7 @@ export default function DashboardPage() {
     .slice(0, 3);
 
   return (
-    <div className="zoom-app">
-      {/* Sidebar */}
-      <aside className="zoom-sidebar">
-        <Link href="/" className="zoom-brand">
-          <span className="zoom-brand-icon">M</span>
-
-          <span>
-            <strong>Meeting Intelligence</strong>
-            <small>AI-powered accountability</small>
-          </span>
-        </Link>
-
-        <div className="sidebar-label">WORKSPACE</div>
-
-        <nav className="sidebar-nav" aria-label="Main navigation">
-          <Link href="/" className="nav-item active" aria-current="page">
-            <span className="nav-icon">⌂</span>
-            <span>Dashboard</span>
-          </Link>
-
-          <a
-            href="#meetings"
-            className="nav-item"
-            onClick={(event) => {
-              event.preventDefault();
-              document.getElementById("meetings")?.scrollIntoView({
-                behavior: "smooth",
-              });
-            }}
-          >
-            <span className="nav-icon">▤</span>
-            <span>My meetings</span>
-          </a>
-
-          <Link href="/meetings/new" className="nav-item">
-            <span className="nav-icon">＋</span>
-            <span>New meeting</span>
-          </Link>
-        </nav>
-
-        <div className="sidebar-bottom">
-          <div className="sidebar-help-icon">?</div>
-
-          <div>
-            <strong>Meeting workspace</strong>
-            <p>Turn discussions into decisions and actions.</p>
-          </div>
-        </div>
-      </aside>
-
+    <div className="dashboard-page">
       {/* Main content */}
       <main className="zoom-main">
         <header className="zoom-topbar">
@@ -367,19 +320,18 @@ export default function DashboardPage() {
                 ? "Backend connected"
                 : "Backend unavailable"}
           </div>
+          <ReminderBell />
         </header>
 
         <div className="workspace-content">
           {/* Welcome section */}
           <section className="welcome-row">
             <div>
-              <span className="eyebrow">YOUR WORKSPACE</span>
-
-              <h1>Meeting dashboard</h1>
-
+              <span className="eyebrow">✦ YOUR AI WORKSPACE</span>
+              <h1>Your meetings, organized.</h1>
               <p>
-                Review conversations, track commitments, and keep
-                decisions moving forward.
+                Capture conversations, track commitments, and turn every
+                meeting into meaningful progress.
               </p>
             </div>
 
@@ -417,36 +369,40 @@ export default function DashboardPage() {
 
           {/* Metrics */}
           <section className="metrics-grid" aria-label="Meeting statistics">
-            <article className="metric-card">
-              <h3>Total meetings</h3>
-              <strong>
-                {loading ? "—" : meetings.length}
-              </strong>
+            <article className="metric-card metric-card-blue">
+              <div className="metric-card-heading">
+                <h3>Total meetings</h3>
+                <span className="metric-card-icon" aria-hidden="true">▦</span>
+              </div>
+              <strong>{loading ? "—" : meetings.length}</strong>
               <p>Recordings in your workspace</p>
             </article>
 
-            <article className="metric-card">
-              <h3>Completed meetings</h3>
-              <strong>
-                {loading ? "—" : completedMeetings}
-              </strong>
+            <article className="metric-card metric-card-green">
+              <div className="metric-card-heading">
+                <h3>Completed meetings</h3>
+                <span className="metric-card-icon" aria-hidden="true">✓</span>
+              </div>
+              <strong>{loading ? "—" : completedMeetings}</strong>
               <p>Meetings marked completed</p>
             </article>
 
-            <article className="metric-card">
-              <h3>Commitments</h3>
-              <strong>
-                {loading ? "—" : commitments.length}
-              </strong>
+            <article className="metric-card metric-card-purple">
+              <div className="metric-card-heading">
+                <h3>Commitments</h3>
+                <span className="metric-card-icon" aria-hidden="true">☷</span>
+              </div>
+              <strong>{loading ? "—" : commitments.length}</strong>
               <p>Extracted commitment records</p>
             </article>
 
-            <article className="metric-card">
-              <h3>Open action items</h3>
-              <strong>
-                {loading ? "—" : openCommitments}
-              </strong>
-              <p>Items not marked completed</p>
+            <article className="metric-card metric-card-orange">
+              <div className="metric-card-heading">
+                <h3>Open action items</h3>
+                <span className="metric-card-icon" aria-hidden="true">◷</span>
+              </div>
+              <strong>{loading ? "—" : openCommitments}</strong>
+              <p>Items awaiting completion</p>
             </article>
           </section>
 
@@ -501,21 +457,21 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : recentMeetings.length > 0 ? (
-              <div className="meeting-list">
+              <div className="meeting-list meeting-list-redesigned">
                 {recentMeetings.map((meeting) => {
                   const meetingId = getMeetingId(meeting);
                   const summary = summaries[meetingId];
 
                   return (
                     <article
-                      className="meeting-row"
+                      className="meeting-row meeting-row-redesigned"
                       key={meetingId || meeting.title}
                     >
                       <div>
                         <h3>
                           <Link
                             href={`/meetings/${meetingId}`}
-                            className="hover:text-blue-600"
+                            className="meeting-title-link"
                           >
                             {meeting.title || "Untitled meeting"}
                           </Link>
@@ -552,7 +508,7 @@ export default function DashboardPage() {
 
                         <Link
                           href={`/meetings/${meetingId}`}
-                          className="text-button"
+                          className="text-button meeting-open-link"
                         >
                           Open meeting →
                         </Link>
@@ -605,7 +561,7 @@ export default function DashboardPage() {
                 <p>Loading available insights...</p>
               </div>
             ) : latestSummaries.length > 0 ? (
-              <div className="insight-grid">
+              <div className="insight-grid insight-grid-redesigned">
                 {latestSummaries.map((meeting) => {
                   const meetingId = getMeetingId(meeting);
                   const summary = summaries[meetingId];
@@ -615,7 +571,7 @@ export default function DashboardPage() {
 
                   return (
                     <article
-                      className="insight-card"
+                      className="insight-card insight-card-redesigned"
                       key={meetingId}
                     >
                       <span className="eyebrow">MEETING SUMMARY</span>
@@ -642,7 +598,7 @@ export default function DashboardPage() {
 
                       <Link
                         href={`/meetings/${meetingId}`}
-                        className="text-button"
+                        className="text-button insight-review-link"
                       >
                         Review meeting →
                       </Link>
@@ -669,6 +625,7 @@ export default function DashboardPage() {
             Meeting Intelligence · Your conversations, organized.
           </footer>
         </div>
+      
       </main>
     </div>
   );
