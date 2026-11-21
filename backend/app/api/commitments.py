@@ -47,6 +47,69 @@ def create_commitment(
 
 
 # ---------------------------------------------------------
+# List All Commitments
+# ---------------------------------------------------------
+@router.get(
+    "",
+    response_model=list[CommitmentResponse],
+)
+def list_all_commitments(
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import select
+    from app.models.commitment import Commitment
+
+    return list(
+        db.scalars(
+            select(Commitment)
+            .order_by(Commitment.created_at.desc())
+            .limit(500)
+        ).all()
+    )
+
+
+# ---------------------------------------------------------
+# Action Tracker — commitments with meeting and owner names
+# ---------------------------------------------------------
+@router.get("/tracker")
+def list_action_tracker(
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import select
+    from app.models.commitment import Commitment
+    from app.models.meeting import Meeting
+    from app.models.participant import Participant
+
+    rows = db.execute(
+        select(
+            Commitment,
+            Meeting.title,
+            Participant.name,
+        )
+        .join(Meeting, Commitment.meeting_id == Meeting.id)
+        .outerjoin(Participant, Commitment.owner_id == Participant.id)
+        .order_by(Commitment.created_at.desc())
+        .limit(500)
+    ).all()
+
+    return [
+        {
+            "id": str(commitment.id),
+            "meeting_id": str(commitment.meeting_id),
+            "meeting_title": meeting_title,
+            "owner_id": str(commitment.owner_id) if commitment.owner_id else None,
+            "owner_name": owner_name,
+            "task": commitment.task,
+            "deadline": commitment.deadline.isoformat() if commitment.deadline else None,
+            "deadline_text": commitment.deadline_text,
+            "status": commitment.status.value,
+            "notes": commitment.notes,
+        }
+        for commitment, meeting_title, owner_name in rows
+    ]
+
+
+# ---------------------------------------------------------
 # Get One
 # ---------------------------------------------------------
 
@@ -120,6 +183,45 @@ def update_commitment(
             status_code=404,
             detail="Commitment not found.",
         )
+
+    updates = data.model_dump(exclude_unset=True)
+
+    content_fields = {
+        "owner_id",
+        "task",
+        "deadline",
+        "deadline_text",
+        "strength",
+        "notes",
+    }
+
+    if (
+        commitment.verification_status in {"approved", "rejected"}
+        and content_fields.intersection(updates)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This commitment has already been reviewed. "
+                "Use the verification workflow to correct its content."
+            ),
+        )
+
+    if "owner_id" in updates and updates["owner_id"] is not None:
+        from sqlalchemy import select
+        from app.models.participant import Participant
+
+        participant = db.scalar(
+            select(Participant).where(
+                Participant.id == updates["owner_id"],
+                Participant.meeting_id == commitment.meeting_id,
+            )
+        )
+        if participant is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Owner must be a participant in this meeting.",
+            )
 
     return commitment_service.update_commitment(
         db,

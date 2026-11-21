@@ -621,6 +621,12 @@ class ParticipantService:
                 else None
             )
 
+        result["person_id"] = (
+            str(participant.person_id)
+            if participant.person_id
+            else None
+        )
+
         return result
 
 

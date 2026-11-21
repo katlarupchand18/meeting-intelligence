@@ -2512,3 +2512,368 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+/* Dashboard metrics redesign */
+.metric-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.metric-card-heading h3 {
+  margin: 0;
+}
+
+.metric-card-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.metric-card-blue .metric-card-icon {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.metric-card-green .metric-card-icon {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+.metric-card-purple .metric-card-icon {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.metric-card-orange .metric-card-icon {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.metric-card {
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(25, 56, 105, 0.08);
+}
+
+/* Recent Meetings — redesigned rows */
+.meeting-list-redesigned {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.meeting-row-redesigned {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 22px 24px;
+  border: 1px solid #e4eaf3;
+  border-radius: 16px;
+  background: #ffffff;
+  transition: border-color 180ms ease,
+              box-shadow 180ms ease,
+              transform 180ms ease;
+}
+
+.meeting-row-redesigned:hover {
+  border-color: #bfd5ff;
+  box-shadow: 0 8px 24px rgba(30, 64, 120, 0.07);
+  transform: translateY(-2px);
+}
+
+.meeting-row-redesigned > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.meeting-row-redesigned h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.5;
+  color: #172b4d;
+}
+
+.meeting-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.meeting-title-link:hover {
+  color: #2563eb;
+}
+
+.meeting-row-redesigned p {
+  margin: 6px 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.meeting-open-link {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .meeting-row-redesigned {
+    flex-direction: column;
+    padding: 18px;
+    gap: 14px;
+  }
+}
+
+/* Dashboard topbar actions */
+.dashboard-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 20px;
+  min-width: 0;
+}
+
+.dashboard-topbar-actions .topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .dashboard-topbar-actions {
+    gap: 10px;
+  }
+}
+
+/* Dashboard AI Insights redesign */
+.insight-grid-redesigned {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.insight-card-redesigned {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid #e4eaf3;
+  border-radius: 18px;
+  background: #ffffff;
+  transition: border-color 180ms ease,
+              box-shadow 180ms ease,
+              transform 180ms ease;
+}
+
+.insight-card-redesigned:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 12px 28px rgba(30, 64, 120, 0.07);
+  transform: translateY(-2px);
+}
+
+.insight-card-redesigned .eyebrow {
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+}
+
+.insight-card-redesigned h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  color: #172b4d;
+}
+
+.insight-card-redesigned > p {
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.insight-review-link {
+  margin-top: auto;
+  padding-top: 8px;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .insight-grid-redesigned {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* New Meeting — light workspace redesign */
+.upload-page-redesigned {
+  min-width: 0;
+  min-height: 100vh;
+  flex: 1;
+  background: #f5f7fb;
+  color: #172b4d;
+}
+
+.upload-content-redesigned {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 42px 36px 72px;
+}
+
+.upload-content-redesigned h2 {
+  color: #172b4d;
+}
+
+.upload-content-redesigned input,
+.upload-content-redesigned select {
+  color: #172b4d;
+}
+
+.upload-content-redesigned input:focus,
+.upload-content-redesigned select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.10);
+}
+
+.upload-content-redesigned form > div {
+  border-radius: 18px;
+}
+
+@media (max-width: 768px) {
+  .upload-content-redesigned {
+    padding: 24px 16px 48px;
+  }
+}
+
+/* Meeting Details — light blue workspace */
+.meeting-details-workspace {
+  flex: 1;
+  min-width: 0;
+  background: #f5f7fb;
+}
+
+.meeting-details-container {
+  width: 100%;
+  max-width: 1380px;
+  padding-top: 36px;
+  padding-bottom: 72px;
+}
+
+.meeting-details-header {
+  padding: 8px 0 12px;
+}
+
+.meeting-details-header h1 {
+  color: #172b4d;
+  letter-spacing: -0.035em;
+}
+
+.meeting-details-header > div:last-child {
+  align-self: flex-start;
+}
+
+.meeting-details-metrics > div {
+  border: 1px solid #e3eaf4;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(30, 64, 120, 0.035);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.meeting-details-metrics > div:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(30, 64, 120, 0.08);
+}
+
+.meeting-details-tabs {
+  border-radius: 14px;
+  padding: 6px;
+}
+
+.meeting-details-tabs button {
+  border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+  .meeting-details-container {
+    padding-top: 24px;
+    padding-bottom: 48px;
+  }
+}
+
+/* Action Tracker: align content beside fixed sidebar */
+.zoom-app > .action-tracker-page {
+  flex: 1 1 auto;
+  width: calc(100% - var(--sidebar-width));
+  min-width: 0;
+  margin-left: var(--sidebar-width);
+}
+
+.action-tracker-page > .mx-auto {
+  width: 100%;
+}
+
+
+/* UNIFIED PAGE LAYOUT FIX */
+
+/* Fixed sidebar: reserve its width once at the app level */
+.zoom-app {
+  display: block;
+  min-height: 100vh;
+}
+
+.zoom-app > .zoom-sidebar {
+  position: fixed;
+}
+
+/* Every direct page receives the same available workspace */
+.zoom-app > :not(.zoom-sidebar) {
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% - var(--sidebar-width));
+  max-width: none;
+  min-width: 0;
+  margin-left: var(--sidebar-width);
+}
+
+/* Dashboard already has an inner main element */
+.zoom-app > .dashboard-page > .zoom-main {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0;
+}
+
+/* Full-width dashboard content */
+.dashboard-page .workspace-content {
+  width: 100%;
+  max-width: none;
+}
+
+/* Action Tracker: avoid double sidebar offsets */
+.zoom-app > .action-tracker-page {
+  margin-left: var(--sidebar-width);
+  width: calc(100% - var(--sidebar-width));
+}
+
+/* Prevent oversized content from forcing horizontal overflow */
+.zoom-app > :not(.zoom-sidebar) {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .zoom-app > :not(.zoom-sidebar) {
+    width: calc(100% - var(--sidebar-width));
+    margin-left: var(--sidebar-width);
+  }
+}

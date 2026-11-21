@@ -273,7 +273,7 @@ function ProcessingProgress({ meeting }: { meeting: Meeting }) {
                     }`}>
                       {done ? "✓" : index + 1}
                     </span>
-                    <span className="text-sm font-semibold text-slate-800">{item.label}</span>
+                    <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700">{item.label}</span>
                   </div>
                   <p className="mt-2 text-xs leading-5 text-slate-500">{item.description}</p>
                 </li>
@@ -534,10 +534,10 @@ export default function MeetingDetailsPage({ params }: PageProps) {
     { id: "evidence", label: "Evidence" },
   ];
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <main className="meeting-details-workspace min-h-screen min-w-0 flex-1 bg-slate-50 text-slate-900">
+      <div className="meeting-details-container mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {/* Header */}
-        <header className="mb-7 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <header className="meeting-details-header mb-7 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
               <a href="/" className="hover:text-slate-900">
@@ -571,6 +571,12 @@ export default function MeetingDetailsPage({ params }: PageProps) {
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
+            <a
+              href={`/chat?meeting_id=${encodeURIComponent(String(meeting.id))}`}
+              className="inline-flex items-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700"
+            >
+              ✦ Ask AI
+            </a>
             <button
               onClick={() => void refreshMeeting()}
               disabled={refreshing}
@@ -602,7 +608,7 @@ export default function MeetingDetailsPage({ params }: PageProps) {
         <ProcessingProgress meeting={meeting} />
 
       {/* Metrics */}
-        <section className="mb-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <section className="meeting-details-metrics mb-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
             {
               label: "Decisions",
@@ -644,14 +650,14 @@ export default function MeetingDetailsPage({ params }: PageProps) {
           ))}
         </section>
         {/* Navigation */}
-        <nav className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+        <nav className="meeting-details-tabs mb-6 flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`shrink-0 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
                 activeTab === tab.id
-                  ? "bg-slate-900 text-white"
+                  ? "bg-blue-600 text-white"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               }`}
             >
@@ -827,9 +833,9 @@ export default function MeetingDetailsPage({ params }: PageProps) {
                 {filteredTranscript.map((segment) => (
                   <article
                     key={segment.id}
-                    className="rounded-xl border border-slate-200 p-4 transition hover:border-slate-300"
+                    className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-blue-200 hover:shadow-sm"
                   >
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                       <span className="text-sm font-semibold text-slate-800">
                         {segment.speaker_name ||
                           segment.speaker_label ||
@@ -840,7 +846,7 @@ export default function MeetingDetailsPage({ params }: PageProps) {
                         {formatTime(segment.end_time)}
                       </span>
                     </div>
-                    <p className="whitespace-pre-wrap text-sm leading-7 text-slate-600">
+                    <p className="whitespace-pre-wrap border-l-2 border-blue-100 pl-4 text-sm leading-7 text-slate-700">
                       {segment.text}
                     </p>
                   </article>

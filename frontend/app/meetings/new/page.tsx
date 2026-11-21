@@ -106,6 +106,9 @@ export default function NewMeetingPage() {
   const [meetingType, setMeetingType] = useState("business");
   const [file, setFile] = useState<File | null>(null);
 
+  const [inputMode, setInputMode] = useState<"recording" | "file" | "paste">("recording");
+  const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
+  const [transcriptText, setTranscriptText] = useState("");
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -132,6 +135,23 @@ export default function NewMeetingPage() {
     setSuccess("");
     setProgress(0);
 
+    return true;
+  }
+
+  function validateTranscriptFile(selectedFile: File): boolean {
+    if (!selectedFile.name.toLowerCase().endsWith(".txt")) {
+      setError("Only .txt transcript files are supported.");
+      return false;
+    }
+
+    if (selectedFile.size === 0 || selectedFile.size > 2 * 1024 * 1024) {
+      setError("Transcript must be non-empty and no larger than 2 MB.");
+      return false;
+    }
+
+    setTranscriptFile(selectedFile);
+    setError("");
+    setSuccess("");
     return true;
   }
 
@@ -186,8 +206,26 @@ export default function NewMeetingPage() {
       return;
     }
 
-    if (!file) {
+    if (inputMode === "recording" && !file) {
       setError("Please select an audio or video recording.");
+      return;
+    }
+
+    if (inputMode === "file" && !transcriptFile) {
+      setError("Please select a .txt transcript file.");
+      return;
+    }
+
+    if (inputMode === "paste" && !transcriptText.trim()) {
+      setError("Please paste your meeting transcript.");
+      return;
+    }
+
+    if (
+      inputMode === "paste" &&
+      new TextEncoder().encode(transcriptText.trim()).length > 2 * 1024 * 1024
+    ) {
+      setError("Transcript exceeds 2 MB.");
       return;
     }
 
@@ -200,9 +238,20 @@ export default function NewMeetingPage() {
       formData.append("title", title.trim());
       formData.append("description", description.trim());
       formData.append("meeting_type", meetingType);
-      formData.append("file", file);
+      if (inputMode === "recording" && file) {
+        formData.append("file", file);
+      } else if (inputMode === "file" && transcriptFile) {
+        formData.append("file", transcriptFile);
+      } else if (inputMode === "paste") {
+        formData.append("transcript_text", transcriptText.trim());
+      }
 
-      const response = await fetch(`${API_URL}/api/meetings`, {
+      const endpoint =
+        inputMode === "recording"
+          ? `${API_URL}/api/meetings`
+          : `${API_URL}/api/meetings/from-transcript`;
+
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
       });
@@ -252,47 +301,11 @@ export default function NewMeetingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070b14] text-white">
-      {/* Background effects */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute left-[-120px] top-[-120px] h-[400px] w-[400px] rounded-full bg-blue-600/10 blur-[120px]" />
-        <div className="absolute right-[-100px] top-[20%] h-[400px] w-[400px] rounded-full bg-purple-600/10 blur-[120px]" />
-      </div>
-
-      {/* Navigation */}
-      <nav className="relative z-10 border-b border-white/10 bg-[#070b14]/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="flex items-center gap-3"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600">
-              <span className="font-bold">M</span>
-            </div>
-
-            <div className="text-left">
-              <h1 className="text-lg font-bold">Meeting Intelligence</h1>
-              <p className="text-xs text-gray-500">
-                AI-powered meeting accountability
-              </p>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="text-sm text-gray-400 transition hover:text-white"
-          >
-            ← Dashboard
-          </button>
-        </div>
-      </nav>
-
+    <main className="upload-page-redesigned">
       {/* Page content */}
-      <section className="relative z-10 mx-auto max-w-4xl px-6 py-10">
+      <section className="upload-content-redesigned">
         <div className="mb-8">
-          <div className="mb-3 inline-flex rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-xs text-blue-300">
+          <div className="mb-3 inline-flex rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
             New Meeting
           </div>
 
@@ -300,7 +313,7 @@ export default function NewMeetingPage() {
             Add a meeting recording
           </h2>
 
-          <p className="mt-2 text-gray-400">
+          <p className="mt-2 text-slate-500">
             Upload a meeting recording to extract the conversation, speakers,
             decisions, commitments, evidence, and accountability information.
           </p>
@@ -308,7 +321,7 @@ export default function NewMeetingPage() {
 
         <form onSubmit={createMeeting} className="space-y-6">
           {/* Meeting information */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-5 text-lg font-semibold">
               Meeting information
             </h3>
@@ -317,7 +330,7 @@ export default function NewMeetingPage() {
               <div className="md:col-span-2">
                 <label
                   htmlFor="meeting-title"
-                  className="mb-2 block text-sm font-medium text-gray-300"
+                  className="mb-2 block text-sm font-medium text-slate-700"
                 >
                   Meeting title <span className="text-red-400">*</span>
                 </label>
@@ -331,14 +344,14 @@ export default function NewMeetingPage() {
                   maxLength={200}
                   required
                   disabled={loading}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-gray-600 focus:border-blue-500/60 disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500/60 disabled:opacity-60"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor="meeting-type"
-                  className="mb-2 block text-sm font-medium text-gray-300"
+                  className="mb-2 block text-sm font-medium text-slate-700"
                 >
                   Meeting type
                 </label>
@@ -348,7 +361,7 @@ export default function NewMeetingPage() {
                   value={meetingType}
                   onChange={(event) => setMeetingType(event.target.value)}
                   disabled={loading}
-                  className="w-full rounded-xl border border-white/10 bg-[#0d1320] px-4 py-3 text-sm text-white outline-none focus:border-blue-500/60 disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500/60 disabled:opacity-60"
                 >
                   {MEETING_TYPES.map((type) => (
                     <option key={type.value} value={type.value}>
@@ -361,7 +374,7 @@ export default function NewMeetingPage() {
               <div>
                 <label
                   htmlFor="meeting-description"
-                  className="mb-2 block text-sm font-medium text-gray-300"
+                  className="mb-2 block text-sm font-medium text-slate-700"
                 >
                   Description
                 </label>
@@ -374,17 +387,53 @@ export default function NewMeetingPage() {
                   placeholder="Optional description"
                   maxLength={2000}
                   disabled={loading}
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-gray-600 focus:border-blue-500/60 disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500/60 disabled:opacity-60"
                 />
               </div>
             </div>
           </div>
 
-          {/* Recording upload */}
-          <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-6">
+          
+            {/* Input method selector */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="mb-4 text-lg font-semibold">
+                Choose input method
+              </h3>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                {([
+                  ["recording", "🎙️ Audio / Video"],
+                  ["file", "📄 Transcript File"],
+                  ["paste", "✍️ Paste Transcript"],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setInputMode(mode);
+                      setError("");
+                      setSuccess("");
+                    }}
+                    className={`rounded-xl border px-4 py-4 text-sm font-medium transition ${
+                      inputMode === mode
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {inputMode === "recording" && (
+              <>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-2 text-lg font-semibold">Recording</h3>
 
-            <p className="mb-5 text-sm text-gray-500">
+            <p className="mb-5 text-sm text-slate-500">
               Select an audio or video file from your computer.
             </p>
 
@@ -402,8 +451,8 @@ export default function NewMeetingPage() {
                 loading ? "cursor-not-allowed opacity-60" : "cursor-pointer"
               } ${
                 dragging
-                  ? "border-blue-400 bg-blue-500/10"
-                  : "border-white/10 bg-black/10 hover:border-white/20 hover:bg-white/[0.02]"
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-blue-200 bg-blue-50/40 hover:border-blue-400 hover:bg-blue-50"
               }`}
             >
               <input
@@ -421,15 +470,15 @@ export default function NewMeetingPage() {
 
               {file ? (
                 <>
-                  <p className="break-all font-medium text-gray-200">
+                  <p className="break-all font-medium text-slate-800">
                     {file.name}
                   </p>
 
-                  <p className="mt-2 text-sm text-gray-500">
+                  <p className="mt-2 text-sm text-slate-500">
                     {formatFileSize(file.size)}
                   </p>
 
-                  <span className="mt-4 rounded-lg bg-white/5 px-4 py-2 text-xs text-gray-400">
+                  <span className="mt-4 rounded-lg bg-slate-100 px-4 py-2 text-xs text-slate-500">
                     {loading
                       ? "Uploading file..."
                       : "Click to choose another file"}
@@ -437,15 +486,15 @@ export default function NewMeetingPage() {
                 </>
               ) : (
                 <>
-                  <p className="font-medium text-gray-200">
+                  <p className="font-medium text-slate-800">
                     Drop your recording here
                   </p>
 
-                  <p className="mt-2 text-sm text-gray-500">
+                  <p className="mt-2 text-sm text-slate-500">
                     or click to browse your computer
                   </p>
 
-                  <span className="mt-4 text-xs text-gray-600">
+                  <span className="mt-4 text-xs text-slate-400">
                     MP3 · WAV · M4A · AAC · FLAC · OGG · MP4 · MOV · WEBM · AVI
                     · MKV
                   </span>
@@ -456,15 +505,15 @@ export default function NewMeetingPage() {
             {loading && (
               <div className="mt-5">
                 <div className="mb-2 flex justify-between text-sm">
-                  <span className="text-gray-400">Sending recording...</span>
+                  <span className="text-slate-500">Sending recording...</span>
                   <span className="text-blue-300">
                     {progress === 100 ? "Complete" : "Please wait"}
                   </span>
                 </div>
 
-                <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
                   <div
-                    className={`h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-500 ${
+                    className={`h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 ${
                       progress === 100
                         ? "w-full"
                         : "w-1/3 animate-pulse"
@@ -475,11 +524,68 @@ export default function NewMeetingPage() {
             )}
           </div>
 
-          {/* Error message */}
+          
+              </>
+            )}
+
+            {inputMode === "file" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="mb-2 text-lg font-semibold">
+                  Upload transcript
+                </h3>
+                <p className="mb-4 text-sm text-slate-500">
+                  UTF-8 .txt files only, maximum 2 MB.
+                </p>
+
+                <input
+                  type="file"
+                  accept=".txt,text/plain"
+                  disabled={loading}
+                  onChange={(event) => {
+                    const selected = event.target.files?.[0];
+                    if (selected) validateTranscriptFile(selected);
+                    event.target.value = "";
+                  }}
+                  className="block w-full rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
+                />
+
+                {transcriptFile && (
+                  <p className="mt-3 text-sm text-blue-700">
+                    Selected: {transcriptFile.name} ({formatFileSize(transcriptFile.size)})
+                  </p>
+                )}
+              </div>
+            )}
+
+            {inputMode === "paste" && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="mb-2 text-lg font-semibold">
+                  Paste transcript
+                </h3>
+                <p className="mb-4 text-sm text-slate-500">
+                  Paste the conversation from your meeting.
+                </p>
+
+                <textarea
+                  value={transcriptText}
+                  onChange={(event) => setTranscriptText(event.target.value)}
+                  disabled={loading}
+                  rows={12}
+                  placeholder={"[00:00] Alice: Let's review the project.\n[00:15] Bob: I'll finish the report by Friday."}
+                  className="w-full resize-y rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500"
+                />
+
+                <p className="mt-2 text-xs text-slate-500">
+                  {new TextEncoder().encode(transcriptText).length.toLocaleString()} / 2,097,152 bytes
+                </p>
+              </div>
+            )}
+
+{/* Error message */}
           {error && (
             <div
               role="alert"
-              className="break-words rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+              className="break-words rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700"
             >
               <p className="mb-1 font-semibold">Unable to create meeting</p>
               <p>{error}</p>
@@ -490,7 +596,7 @@ export default function NewMeetingPage() {
           {success && (
             <div
               role="status"
-              className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300"
+              className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700"
             >
               {success}
             </div>
@@ -502,15 +608,21 @@ export default function NewMeetingPage() {
               type="button"
               onClick={() => router.push("/")}
               disabled={loading}
-              className="rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-medium text-gray-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
 
             <button
               type="submit"
-              disabled={loading || !title.trim() || !file}
-              className="rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3 text-sm font-semibold shadow-lg shadow-blue-600/20 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+              disabled={
+                  loading ||
+                  !title.trim() ||
+                  (inputMode === "recording" && !file) ||
+                  (inputMode === "file" && !transcriptFile) ||
+                  (inputMode === "paste" && !transcriptText.trim())
+                }
+              className="rounded-xl bg-blue-600 text-white px-6 py-3 text-sm font-semibold shadow-lg shadow-blue-600/20 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
             >
               {loading ? "Uploading..." : "Create Meeting →"}
             </button>

@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import AppSidebar from "./components/AppSidebar";
 
 export const metadata: Metadata = {
   title: {
@@ -38,7 +40,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="zoom-app">
+          <Suspense fallback={null}>
+          <AppSidebar />
+        </Suspense>
+          {children}
+        </div>
+      </body>
     </html>
   );
 }
