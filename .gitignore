@@ -75,3 +75,10 @@ __pycache__/
 
 # macOS metadata
 .DS_Store
+
+# Track backend SQLAlchemy source models
+!backend/app/models/
+!backend/app/models/*.py
+
+# Local recovery backups
+backend/models_recovery_backup_*/
