@@ -1,6 +1,7 @@
 from uuid import UUID
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -38,7 +39,7 @@ async def search_memory(
             query=data.query,
             limit=data.limit,
             similarity_threshold=(
-                data.similarity_threshold
+                data.similarity_threshold if data.similarity_threshold is not None else 0.35
             ),
             meeting_id=data.meeting_id,
         )
@@ -56,6 +57,43 @@ async def search_memory(
                 "Memory search failed: "
                 f"{str(exc)}"
             ),
+        ) from exc
+
+
+# ---------------------------------------------------------
+# Enhanced Search with Filters
+# ---------------------------------------------------------
+
+@router.get(
+    "/search",
+    response_model=MemorySearchResponse,
+)
+async def search_memory_get(
+    q: str = Query(..., min_length=1, max_length=2000),
+    limit: int = Query(default=20, ge=1, le=100),
+    similarity_threshold: float = Query(default=0.35, ge=0.0, le=1.0),
+    meeting_id: Optional[UUID] = Query(default=None),
+    result_type: Optional[str] = Query(default=None, pattern="^(all|commitment|decision|summary|transcript)$"),
+    db: Session = Depends(get_db),
+):
+    """Search with GET method for easier linking and filtering."""
+    try:
+        return await memory_service.search_memory(
+            db=db,
+            query=q,
+            limit=limit,
+            similarity_threshold=similarity_threshold,
+            meeting_id=meeting_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Memory search failed: {str(exc)}",
         ) from exc
 
 

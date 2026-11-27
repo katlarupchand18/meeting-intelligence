@@ -1,12 +1,34 @@
-from __future__ import annotations
-import asyncio
+"""
+Hybrid Meeting Analysis Service.
 
+Pipeline:
+Transcript input
+→ NLP preprocessing
+→ Sentence and speaker identification
+→ Entity and deadline extraction
+→ NLP-based commitment candidate detection
+→ NLP-based decision candidate detection
+→ Semantic embeddings and candidate matching
+→ Groq/Ollama contextual validation
+→ Structured schema validation
+→ Evidence linking
+→ Deduplication
+→ Database persistence
+→ Human verification
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.commitment import (
     Commitment,
     CommitmentStatus,
@@ -16,6 +38,7 @@ from app.models.decision import (
     Decision,
     DecisionStatus,
 )
+from app.models.embedding import MeetingEmbedding
 from app.models.evidence import Evidence
 from app.models.meeting import Meeting
 from app.models.transcript import TranscriptSegment
@@ -23,77 +46,68 @@ from app.models.transcript import TranscriptSegment
 from app.schemas.analysis import MeetingAnalysisResponse
 
 from app.services.llm_service import llm_service
+from app.services.nlp_preprocessing_service import (
+    nlp_preprocessing_service,
+    ProcessedTranscript,
+)
+from app.services.nlp_commitment_extraction import (
+    nlp_commitment_extractor,
+    CommitmentCandidate,
+)
+from app.services.nlp_decision_extraction import (
+    nlp_decision_extractor,
+    DecisionCandidate,
+)
 from app.services.owner_resolution_service import (
     owner_resolution_service,
 )
+from app.services.embedding_service import embedding_service
+from app.services.memory_service import memory_service
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisService:
     """
-    Main meeting intelligence service.
-
-    Pipeline:
-
-        Transcript
-            ↓
-        Chunk transcript
-            ↓
-        Qwen3 / Local LLM
-            ↓
-        Extract decisions + commitments
-            ↓
-        Merge results
-            ↓
-        Save decisions
-            ↓
-        Save commitments
-            ↓
-        Resolve owners
-            ↓
-        Save evidence
-            ↓
-        Update meeting
-            ↓
-        Return analysis
+    Main meeting intelligence service with hybrid NLP + LLM pipeline.
     """
 
-    CHUNK_SIZE = 10
+    # Chunk size for large transcripts (number of segments per chunk)
+    CHUNK_SIZE = 20
 
-    # =========================================================
-    # MAIN ANALYSIS
-    # =========================================================
+    # Maximum candidates to send for LLM validation per chunk
+    MAX_CANDIDATES_PER_CHUNK = 15
 
     async def analyze_meeting(
         self,
         db: Session,
         meeting_id: UUID,
     ) -> MeetingAnalysisResponse:
+        """
+        Analyze a meeting using the hybrid NLP + LLM pipeline.
 
+        Args:
+            db: Database session
+            meeting_id: Meeting UUID
+
+        Returns:
+            MeetingAnalysisResponse with extracted decisions, commitments, evidence
+        """
         meeting = db.scalar(
-            select(Meeting).where(
-                Meeting.id == meeting_id
-            )
+            select(Meeting).where(Meeting.id == meeting_id)
         )
 
         if meeting is None:
-            raise ValueError(
-                "Meeting not found."
-            )
+            raise ValueError("Meeting not found.")
 
         # -----------------------------------------------------
         # LOAD TRANSCRIPT
         # -----------------------------------------------------
-
         transcript_segments = list(
             db.scalars(
                 select(TranscriptSegment)
-                .where(
-                    TranscriptSegment.meeting_id
-                    == meeting_id
-                )
-                .order_by(
-                    TranscriptSegment.sequence_number
-                )
+                .where(TranscriptSegment.meeting_id == meeting_id)
+                .order_by(TranscriptSegment.sequence_number)
             ).all()
         )
 
@@ -103,152 +117,107 @@ class AnalysisService:
                 "Transcribe the meeting before analysis."
             )
 
-        # -----------------------------------------------------
-        # BUILD CHUNKS
-        # -----------------------------------------------------
+        # Convert segments to dict format for NLP processing
+        segments_data = [
+            {
+                "id": seg.id,
+                "speaker_name": seg.speaker_name,
+                "speaker_label": seg.speaker_label,
+                "text": seg.text,
+                "start_time": seg.start_time,
+                "end_time": seg.end_time,
+                "sequence_number": seg.sequence_number,
+            }
+            for seg in transcript_segments
+        ]
 
-        chunks = self._build_chunks(
-            transcript_segments
+        # -----------------------------------------------------
+        # NLP PREPROCESSING
+        # -----------------------------------------------------
+        logger.info(f"Starting NLP preprocessing for meeting {meeting_id}")
+        processed = nlp_preprocessing_service.process_transcript(
+            meeting_id=meeting_id,
+            segments=segments_data,
+        )
+        logger.info(
+            f"NLP preprocessing complete: {len(processed.sentences)} sentences, "
+            f"{len(processed.entities)} entities, {len(processed.dates)} dates, "
+            f"{len(processed.speakers)} speakers"
         )
 
-        if not chunks:
-            raise RuntimeError(
-                "Unable to create transcript chunks."
+        # -----------------------------------------------------
+        # NLP-BASED CANDIDATE EXTRACTION
+        # -----------------------------------------------------
+        logger.info("Extracting commitment candidates via NLP...")
+        commitment_candidates = nlp_commitment_extractor.extract_candidates(processed)
+        logger.info(f"Found {len(commitment_candidates)} commitment candidates")
+
+        logger.info("Extracting decision candidates via NLP...")
+        decision_candidates = nlp_decision_extractor.extract_candidates(processed)
+        logger.info(f"Found {len(decision_candidates)} decision candidates")
+
+        # -----------------------------------------------------
+        # LLM CONTEXTUAL VALIDATION
+        # -----------------------------------------------------
+        logger.info("Running LLM contextual validation...")
+
+        # Process in chunks for large transcripts
+        if len(processed.sentences) > self.CHUNK_SIZE:
+            validated_commitments, validated_decisions = await self._validate_in_chunks(
+                processed, commitment_candidates, decision_candidates
+            )
+        else:
+            validated_commitments, validated_decisions = await self._validate_candidates(
+                processed, commitment_candidates, decision_candidates
             )
 
-        # -----------------------------------------------------
-        # ANALYZE CHUNKS
-        # -----------------------------------------------------
-
-        chunk_results: list[
-            dict[str, Any]
-        ] = []
-
-        for chunk_number, chunk in enumerate(
-            chunks,
-            start=1,
-        ):
-            try:
-                result = await asyncio.to_thread(
-                    self._analyze_chunk,
-                    chunk=chunk,
-                    chunk_number=chunk_number,
-                    total_chunks=len(chunks),
-                )
-
-                if result:
-                    chunk_results.append(
-                        result
-                    )
-
-            except Exception as exc:
-                print(
-                    f"Chunk {chunk_number} analysis failed: "
-                    f"{exc}"
-                )
-
-        if not chunk_results:
-            raise RuntimeError(
-                "The local LLM could not analyze "
-                "any transcript chunks."
-            )
-
-        # -----------------------------------------------------
-        # MERGE RESULTS
-        # -----------------------------------------------------
-
-        merged = await asyncio.to_thread(
-            self._merge_results,
-            chunk_results,
+        logger.info(
+            f"Validation complete: {len(validated_commitments)} commitments, "
+            f"{len(validated_decisions)} decisions"
         )
 
         # -----------------------------------------------------
         # DELETE PREVIOUS AI RESULTS
         # -----------------------------------------------------
-
-        self._delete_previous_results(
-            db=db,
-            meeting_id=meeting_id,
-        )
+        self._delete_previous_results(db, meeting_id)
 
         # -----------------------------------------------------
         # SAVE DECISIONS
         # -----------------------------------------------------
+        saved_decisions: list[tuple[Decision, dict[str, Any]]] = []
 
-        saved_decisions: list[
-            tuple[Decision, dict[str, Any]]
-        ] = []
-
-        for decision_data in merged.get(
-            "decisions",
-            [],
-        ):
-            decision = self._create_decision(
-                meeting_id=meeting_id,
-                data=decision_data,
-            )
-
+        for decision_data in validated_decisions:
+            decision = self._create_decision(meeting_id, decision_data)
             db.add(decision)
             db.flush()
-
-            saved_decisions.append(
-                (
-                    decision,
-                    decision_data,
-                )
-            )
+            saved_decisions.append((decision, decision_data))
 
         # -----------------------------------------------------
         # SAVE COMMITMENTS
         # -----------------------------------------------------
+        saved_commitments: list[tuple[Commitment, dict[str, Any]]] = []
 
-        saved_commitments: list[
-            tuple[Commitment, dict[str, Any]]
-        ] = []
-
-        for commitment_data in merged.get(
-            "commitments",
-            [],
-        ):
-            commitment = self._create_commitment(
-                meeting_id=meeting_id,
-                data=commitment_data,
-            )
-
+        for commitment_data in validated_commitments:
+            commitment = self._create_commitment(meeting_id, commitment_data)
             db.add(commitment)
             db.flush()
-
-            saved_commitments.append(
-                (
-                    commitment,
-                    commitment_data,
-                )
-            )
+            saved_commitments.append((commitment, commitment_data))
 
         # -----------------------------------------------------
         # RESOLVE COMMITMENT OWNERS
         # -----------------------------------------------------
-
         db.flush()
 
-        assigned_owner_count = (
-            owner_resolution_service
-            .resolve_meeting_commitments(
-                db=db,
-                meeting_id=meeting_id,
-            )
+        assigned_owner_count = owner_resolution_service.resolve_meeting_commitments(
+            db=db, meeting_id=meeting_id
         )
-
-        print(
-            "Commitment owner resolution: "
-            f"{assigned_owner_count}/"
-            f"{len(saved_commitments)} assigned."
+        logger.info(
+            f"Commitment owner resolution: {assigned_owner_count}/{len(saved_commitments)} assigned."
         )
 
         # -----------------------------------------------------
         # SAVE EVIDENCE
         # -----------------------------------------------------
-
         saved_evidence: list[Evidence] = []
 
         self._create_decision_evidence(
@@ -268,15 +237,10 @@ class AnalysisService:
         )
 
         # -----------------------------------------------------
-        # UPDATE MEETING SUMMARY
+        # GENERATE SUMMARY AND KEY TOPICS
         # -----------------------------------------------------
-
-        summary = self._clean_string(
-            merged.get("summary")
-        )
-
-        key_topics = self._clean_string_list(
-            merged.get("key_topics")
+        summary, key_topics = await self._generate_summary_and_topics(
+            processed, validated_commitments, validated_decisions
         )
 
         if summary:
@@ -285,66 +249,56 @@ class AnalysisService:
         db.commit()
 
         # -----------------------------------------------------
+        # INDEX FOR MEMORY SEARCH
+        # -----------------------------------------------------
+        try:
+            memory_contents = memory_service.build_memory_content(
+                summary=summary,
+                decisions=[d[1] for d in saved_decisions],
+                commitments=[c[1] for c in saved_commitments],
+            )
+            if memory_contents:
+                await memory_service.index_meeting(db, meeting_id, memory_contents)
+        except Exception as e:
+            logger.warning(f"Failed to index meeting for memory search: {e}")
+
+        # -----------------------------------------------------
         # REFRESH
         # -----------------------------------------------------
-
         for decision, _ in saved_decisions:
             db.refresh(decision)
-
         for commitment, _ in saved_commitments:
             db.refresh(commitment)
-
         for evidence in saved_evidence:
             db.refresh(evidence)
-
         db.refresh(meeting)
 
         # -----------------------------------------------------
         # CONFIDENCE
         # -----------------------------------------------------
-
-        overall_confidence = (
-            self._calculate_overall_confidence(
-                decisions=[
-                    decision
-                    for decision, _
-                    in saved_decisions
-                ],
-                commitments=[
-                    commitment
-                    for commitment, _
-                    in saved_commitments
-                ],
-                evidence=saved_evidence,
-            )
+        overall_confidence = self._calculate_overall_confidence(
+            decisions=[d for d, _ in saved_decisions],
+            commitments=[c for c, _ in saved_commitments],
+            evidence=saved_evidence,
         )
 
         # -----------------------------------------------------
         # RESPONSE
         # -----------------------------------------------------
-
         return MeetingAnalysisResponse(
             meeting_id=meeting_id,
             summary=summary,
             key_topics=key_topics,
             decisions=[
-                self._decision_to_dict(
-                    decision
-                )
-                for decision, _
-                in saved_decisions
+                self._decision_to_dict(decision)
+                for decision, _ in saved_decisions
             ],
             commitments=[
-                self._commitment_to_dict(
-                    commitment
-                )
-                for commitment, _
-                in saved_commitments
+                self._commitment_to_dict(commitment)
+                for commitment, _ in saved_commitments
             ],
             evidence=[
-                self._evidence_to_dict(
-                    evidence
-                )
+                self._evidence_to_dict(evidence)
                 for evidence in saved_evidence
             ],
             overall_confidence=overall_confidence,
@@ -352,435 +306,314 @@ class AnalysisService:
         )
 
     # =========================================================
-    # CHUNKING
+    # LLM VALIDATION
     # =========================================================
 
-    def _build_chunks(
+    async def _validate_in_chunks(
         self,
-        segments: list[TranscriptSegment],
-    ) -> list[
-        list[TranscriptSegment]
-    ]:
+        processed: ProcessedTranscript,
+        commitment_candidates: list[CommitmentCandidate],
+        decision_candidates: list[DecisionCandidate],
+    ) -> tuple[list[dict], list[dict]]:
+        """Validate candidates in chunks for large transcripts."""
+        # Group candidates by sentence index ranges
+        sentences_per_chunk = self.CHUNK_SIZE
+        num_chunks = (len(processed.sentences) + sentences_per_chunk - 1) // sentences_per_chunk
 
-        chunks: list[
-            list[TranscriptSegment]
-        ] = []
+        all_validated_commitments = []
+        all_validated_decisions = []
 
-        current_chunk: list[
-            TranscriptSegment
-        ] = []
+        for chunk_idx in range(num_chunks):
+            start_idx = chunk_idx * sentences_per_chunk
+            end_idx = min(start_idx + sentences_per_chunk, len(processed.sentences))
 
-        for segment in segments:
-            current_chunk.append(
-                segment
-            )
+            # Filter candidates for this chunk
+            chunk_commitments = [
+                c for c in commitment_candidates
+                if self._get_candidate_sentence_idx(c, processed) in range(start_idx, end_idx)
+            ]
+            chunk_decisions = [
+                d for d in decision_candidates
+                if self._get_candidate_sentence_idx(d, processed) in range(start_idx, end_idx)
+            ]
 
-            if (
-                len(current_chunk)
-                >= self.CHUNK_SIZE
-            ):
-                chunks.append(
-                    current_chunk
+            if chunk_commitments or chunk_decisions:
+                validated_c, validated_d = await self._validate_candidates(
+                    processed, chunk_commitments, chunk_decisions, start_idx, end_idx
                 )
+                all_validated_commitments.extend(validated_c)
+                all_validated_decisions.extend(validated_d)
 
-                current_chunk = []
+        # Deduplicate across chunks
+        all_validated_commitments = self._deduplicate_commitments(all_validated_commitments)
+        all_validated_decisions = self._deduplicate_decisions(all_validated_decisions)
 
-        if current_chunk:
-            chunks.append(
-                current_chunk
-            )
+        return all_validated_commitments, all_validated_decisions
 
-        return chunks
-
-    # =========================================================
-    # CHUNK ANALYSIS
-    # =========================================================
-
-    def _analyze_chunk(
+    def _get_candidate_sentence_idx(
         self,
-        chunk: list[TranscriptSegment],
-        chunk_number: int,
-        total_chunks: int,
-    ) -> dict[str, Any]:
+        candidate: CommitmentCandidate | DecisionCandidate,
+        processed: ProcessedTranscript,
+    ) -> int:
+        """Find the sentence index for a candidate."""
+        for i, sent in enumerate(processed.sentences):
+            if sent.text == candidate.source_sentence:
+                return i
+        return 0
 
-        transcript_text = (
-            self._format_chunk(chunk)
+    async def _validate_candidates(
+        self,
+        processed: ProcessedTranscript,
+        commitment_candidates: list[CommitmentCandidate],
+        decision_candidates: list[DecisionCandidate],
+        start_idx: int = 0,
+        end_idx: int | None = None,
+    ) -> tuple[list[dict], list[dict]]:
+        """
+        Send NLP-extracted candidates to LLM for contextual validation.
+
+        This is the key hybrid step: NLP does candidate extraction,
+        LLM validates and resolves ambiguities.
+        """
+        if not commitment_candidates and not decision_candidates:
+            return [], []
+
+        # Limit candidates per call
+        commitment_candidates = commitment_candidates[:self.MAX_CANDIDATES_PER_CHUNK]
+        decision_candidates = decision_candidates[:self.MAX_CANDIDATES_PER_CHUNK]
+
+        # Build context from relevant sentences
+        context_sentences = processed.sentences[start_idx:end_idx]
+        context_text = "\n".join(
+            f"[{i}] {s.speaker or 'Speaker'}: {s.text}"
+            for i, s in enumerate(context_sentences)
         )
 
-        system_prompt = """
-You are the meeting intelligence engine for an
-evidence-backed meeting accountability system.
+        # Prepare candidates for LLM
+        commitment_data = []
+        for c in commitment_candidates:
+            commitment_data.append({
+                "task": c.task,
+                "owner": c.owner,
+                "deadline": c.deadline_text,
+                "strength": c.strength,
+                "confidence": c.confidence,
+                "source_sentence": c.source_sentence,
+                "speaker": c.speaker,
+                "evidence_tokens": c.evidence_tokens,
+                "linguistic_features": c.linguistic_features,
+                "candidate_score": c.candidate_score,
+            })
 
-Your job is to extract ONLY information actually
-supported by the transcript.
+        decision_data = []
+        for d in decision_candidates:
+            decision_data.append({
+                "title": d.title,
+                "description": d.description,
+                "status": d.status,
+                "confidence": d.confidence,
+                "source_sentence": d.source_sentence,
+                "speaker": d.speaker,
+                "evidence_tokens": d.evidence_tokens,
+                "linguistic_features": d.linguistic_features,
+                "candidate_score": d.candidate_score,
+            })
 
-Important rules:
+        validation_prompt = f"""
+You are a meeting intelligence validation engine.
 
-1. Discussion is NOT a decision.
-2. A proposal is NOT automatically a decision.
-3. A request is NOT automatically a commitment.
-4. A group decision is NOT automatically a personal commitment.
-5. A commitment needs an action/task that someone is
-   actually expected to perform.
-6. Do not invent owners.
-7. Do not invent deadlines.
-8. Do not invent facts.
-9. If an owner is explicitly mentioned, include the
-   person's name.
-10. Evidence must use wording from the transcript.
-11. Prefer missing information over guessing.
-12. False commitments are worse than missing commitments.
+You receive NLP-extracted candidates for commitments and decisions from a meeting transcript.
+Your job is to validate, refine, and filter these candidates using the full context.
 
-Statement types:
+TRANSCRIPT CONTEXT (relevant portion):
+{context_text}
 
-DISCUSSION:
-People are talking about an issue.
+NLP-EXTRACTED COMMITMENT CANDIDATES:
+{json.dumps(commitment_data, indent=2)}
 
-PROPOSAL:
-Someone suggests something but it is not yet accepted.
+NLP-EXTRACTED DECISION CANDIDATES:
+{json.dumps(decision_data, indent=2)}
 
-DECISION:
-The group clearly approves, rejects, adopts, authorizes,
-confirms, resolves, or otherwise reaches a final decision.
+VALIDATION RULES:
 
-COMMITMENT:
-A person or clearly identified party is expected to perform
-a specific action.
+1. COMMITMENTS:
+   - Must have a clear action/task someone is expected to perform
+   - Distinguish: firm commitments (will/shall/must), weak (should/plan), requests (can you/please), unassigned
+   - Owner must be explicitly mentioned or clearly implied by speaker
+   - Deadline must be explicitly stated, not inferred
+   - Reject: group activities, delegations, approvals, future events without individual action
+   - Reject: negated statements ("I won't do X")
 
-Examples:
+2. DECISIONS:
+   - Must be a clear group decision, not a proposal or discussion
+   - Status: accepted (approved/adopted/agreed), rejected, proposed, changed, superseded
+   - Reject: "maybe we should", "I think we should", "someone suggested"
+   - Keep: "motion carried", "we approve", "it is decided", "resolved"
 
-"Maybe we should approve the proposal."
-=> proposal, NOT decision.
+3. EVIDENCE:
+   - Must use exact wording from transcript
+   - Include speaker attribution
 
-"I think we should..."
-=> discussion/proposal, NOT commitment.
-
-"The motion is carried."
-=> decision.
-
-"I will send the report tomorrow."
-=> commitment.
-
-"Can you send the report?"
-=> request unless the transcript clearly shows acceptance.
-
-"The council will attend the conference."
-=> usually a decision/delegation, NOT an individual commitment.
-
-Return ONLY valid JSON.
-"""
-
-        prompt = f"""
-Analyze transcript chunk {chunk_number}
-of {total_chunks}.
-
-TRANSCRIPT:
-
-{transcript_text}
-
-Return exactly this JSON structure:
+Return ONLY valid JSON:
 
 {{
-  "summary": "short summary of this chunk",
-  "key_topics": [
-    "topic 1",
-    "topic 2"
-  ],
-  "decisions": [
-    {{
-      "title": "short decision title",
-      "description": "what was actually decided",
-      "status": "accepted",
-      "confidence": 0.0,
-      "evidence": "short exact transcript evidence"
-    }}
-  ],
   "commitments": [
     {{
       "task": "specific action",
       "owner": "person name or null",
       "deadline": "deadline text or null",
-      "strength": "firm",
+      "deadline_text": "original wording or null",
+      "strength": "firm|weak|request|unassigned",
       "confidence": 0.0,
-      "evidence": "short exact transcript evidence"
+      "evidence": "exact transcript wording"
     }}
-  ]
-}}
-
-Allowed decision status values:
-
-accepted
-rejected
-proposed
-changed
-superseded
-
-Allowed commitment strength values:
-
-firm
-weak
-request
-unassigned
-
-Do not create a commitment merely because the transcript
-contains a future event, meeting, delegation, approval,
-resolution, or group activity.
-
-If there are no decisions, return:
-
-"decisions": []
-
-If there are no commitments, return:
-
-"commitments": []
-
-Transcript:
-
-{transcript_text}
-"""
-
-        result = llm_service.generate_json(
-            prompt=prompt,
-            system_prompt=system_prompt,
-        )
-
-        return self._normalize_chunk_result(
-            result
-        )
-
-    # =========================================================
-    # MERGE
-    # =========================================================
-
-    def _merge_results(
-        self,
-        chunk_results: list[
-            dict[str, Any]
-        ],
-    ) -> dict[str, Any]:
-
-        if len(chunk_results) == 1:
-            return (
-                self._normalize_merged_result(
-                    chunk_results[0]
-                )
-            )
-
-        summaries: list[str] = []
-        topics: list[str] = []
-        decisions: list[
-            dict[str, Any]
-        ] = []
-        commitments: list[
-            dict[str, Any]
-        ] = []
-
-        for result in chunk_results:
-
-            summary = self._clean_string(
-                result.get("summary")
-            )
-
-            if summary:
-                summaries.append(
-                    summary
-                )
-
-            topics.extend(
-                self._clean_string_list(
-                    result.get(
-                        "key_topics"
-                    )
-                )
-            )
-
-            decisions.extend(
-                result.get(
-                    "decisions",
-                    [],
-                )
-            )
-
-            commitments.extend(
-                result.get(
-                    "commitments",
-                    [],
-                )
-            )
-
-        decisions = (
-            self._deduplicate_items(
-                decisions,
-                [
-                    "title",
-                    "description",
-                ],
-            )
-        )
-
-        commitments = (
-            self._deduplicate_items(
-                commitments,
-                [
-                    "task",
-                    "owner",
-                ],
-            )
-        )
-
-        topics = (
-            self._deduplicate_strings(
-                topics
-            )
-        )
-
-        merge_prompt = f"""
-You are merging structured analysis from multiple
-chunks of the SAME meeting.
-
-Your most important job is to avoid false commitments.
-
-Rules:
-
-1. Decision and commitment are different.
-2. A decision may authorize something without creating
-   an individual commitment.
-3. Group activities, delegations, conference attendance,
-   approvals and resolutions are generally decisions unless
-   an individual action is clearly assigned.
-4. Keep only real commitments.
-5. Preserve explicit owners.
-6. Never invent an owner.
-7. Never invent a deadline.
-8. Preserve confidence.
-9. Combine duplicate decisions.
-10. Combine duplicate commitments.
-11. Keep evidence-supported information only.
-
-CHUNK SUMMARIES:
-
-{self._json_for_prompt(summaries)}
-
-CANDIDATE DECISIONS:
-
-{self._json_for_prompt(decisions)}
-
-CANDIDATE COMMITMENTS:
-
-{self._json_for_prompt(commitments)}
-
-Return ONLY JSON:
-
-{{
-  "summary": "concise overall meeting summary",
-  "key_topics": [
-    "topic 1",
-    "topic 2"
   ],
   "decisions": [
     {{
       "title": "short title",
-      "description": "final decision",
-      "status": "accepted",
+      "description": "what was decided",
+      "status": "accepted|rejected|proposed|changed|superseded",
       "confidence": 0.0,
-      "evidence": "supporting transcript wording"
-    }}
-  ],
-  "commitments": [
-    {{
-      "task": "specific action",
-      "owner": "person or null",
-      "deadline": "deadline or null",
-      "strength": "firm",
-      "confidence": 0.0,
-      "evidence": "supporting transcript wording"
+      "evidence": "exact transcript wording"
     }}
   ]
 }}
 
-Allowed decision statuses:
-
-accepted
-rejected
-proposed
-changed
-superseded
-
-Allowed commitment strengths:
-
-firm
-weak
-request
-unassigned
+Allowed commitment strengths: firm, weak, request, unassigned
+Allowed decision statuses: accepted, rejected, proposed, changed, superseded
 """
 
         try:
-            merged = (
-                llm_service.generate_json(
-                    prompt=merge_prompt,
-                    system_prompt=(
-                        "You are a strict meeting "
-                        "intelligence merging engine. "
-                        "Return only valid JSON."
-                    ),
-                )
+            result = await llm_service.agenerate_json(
+                prompt=validation_prompt,
+                system_prompt=(
+                    "You are a strict meeting intelligence validation engine. "
+                    "Return only valid JSON. Be conservative - prefer missing "
+                    "information over false positives."
+                ),
             )
 
-            normalized = (
-                self._normalize_merged_result(
-                    merged
-                )
-            )
+            validated_commitments = result.get("commitments", [])
+            validated_decisions = result.get("decisions", [])
 
-            if (
-                not normalized["decisions"]
-                and decisions
-            ):
-                normalized["decisions"] = (
-                    decisions
-                )
+            # Normalize
+            validated_commitments = self._normalize_validated_commitments(validated_commitments)
+            validated_decisions = self._normalize_validated_decisions(validated_decisions)
 
-            if (
-                not normalized["commitments"]
-                and commitments
-            ):
-                normalized[
-                    "commitments"
-                ] = commitments
-
-            if not normalized[
-                "key_topics"
-            ]:
-                normalized[
-                    "key_topics"
-                ] = topics
-
-            if not normalized[
-                "summary"
-            ]:
-                normalized[
-                    "summary"
-                ] = " ".join(
-                    summaries
-                )
-
-            return normalized
+            return validated_commitments, validated_decisions
 
         except Exception as exc:
+            logger.warning(f"LLM validation failed, using NLP candidates: {exc}")
+            # Fallback: use NLP candidates directly
+            fallback_commitments = [
+                {
+                    "task": c.task,
+                    "owner": c.owner,
+                    "deadline": c.deadline,
+                    "deadline_text": c.deadline_text,
+                    "strength": c.strength,
+                    "confidence": c.confidence,
+                    "evidence": c.source_sentence,
+                }
+                for c in commitment_candidates
+            ]
+            fallback_decisions = [
+                {
+                    "title": d.title,
+                    "description": d.description,
+                    "status": d.status,
+                    "confidence": d.confidence,
+                    "evidence": d.source_sentence,
+                }
+                for d in decision_candidates
+            ]
+            return fallback_commitments, fallback_decisions
 
-            print(
-                "Merge analysis failed, "
-                f"using chunk results: {exc}"
+    def _normalize_validated_commitments(
+        self,
+        commitments: list[dict],
+    ) -> list[dict]:
+        """Normalize validated commitments."""
+        normalized = []
+        for item in commitments:
+            if not isinstance(item, dict):
+                continue
+            normalized.append({
+                "task": str(item.get("task", "")).strip() or "Untitled commitment",
+                "owner": str(item.get("owner", "")).strip() or None,
+                "deadline": str(item.get("deadline", "")).strip() or None,
+                "deadline_text": str(item.get("deadline_text", "")).strip() or None,
+                "strength": str(item.get("strength", "unassigned")).lower().strip(),
+                "confidence": self._safe_confidence(item.get("confidence"), 0.0),
+                "evidence": str(item.get("evidence", "")).strip(),
+            })
+        return normalized
+
+    def _normalize_validated_decisions(
+        self,
+        decisions: list[dict],
+    ) -> list[dict]:
+        """Normalize validated decisions."""
+        normalized = []
+        for item in decisions:
+            if not isinstance(item, dict):
+                continue
+            normalized.append({
+                "title": str(item.get("title", "")).strip() or "Untitled decision",
+                "description": str(item.get("description", "")).strip() or "No description available.",
+                "status": str(item.get("status", "accepted")).lower().strip(),
+                "confidence": self._safe_confidence(item.get("confidence"), 0.0),
+                "evidence": str(item.get("evidence", "")).strip(),
+            })
+        return normalized
+
+    async def _generate_summary_and_topics(
+        self,
+        processed: ProcessedTranscript,
+        commitments: list[dict],
+        decisions: list[dict],
+    ) -> tuple[str | None, list[str]]:
+        """Generate meeting summary and key topics using LLM."""
+        # Build transcript excerpt
+        transcript_text = "\n".join(
+            f"{s.speaker or 'Speaker'}: {s.text}"
+            for s in processed.sentences[:100]  # Limit for context
+        )
+
+        prompt = f"""
+Generate a concise meeting summary and key topics.
+
+TRANSCRIPT:
+{transcript_text}
+
+EXTRACTED COMMITMENTS: {len(commitments)}
+EXTRACTED DECISIONS: {len(decisions)}
+
+Return ONLY JSON:
+{{
+  "summary": "concise 2-3 sentence summary",
+  "key_topics": ["topic1", "topic2", "topic3"]
+}}
+"""
+
+        try:
+            result = await llm_service.agenerate_json(
+                prompt=prompt,
+                system_prompt="Generate concise meeting summaries. Return only valid JSON.",
             )
-
-            return {
-                "summary": " ".join(
-                    summaries
-                ),
-                "key_topics": topics,
-                "decisions": decisions,
-                "commitments": commitments,
-            }
+            summary = result.get("summary", "").strip() or None
+            key_topics = result.get("key_topics", [])
+            if not isinstance(key_topics, list):
+                key_topics = []
+            return summary, [str(t).strip() for t in key_topics if t]
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}")
+            # Fallback: extract from NLP
+            topics = set()
+            for ent in processed.entities:
+                if ent.label in ("ORG", "PRODUCT", "EVENT", "WORK_OF_ART"):
+                    topics.add(ent.text)
+            return None, list(topics)[:10]
 
     # =========================================================
     # CREATE DECISION
@@ -791,37 +624,10 @@ unassigned
         meeting_id: UUID,
         data: dict[str, Any],
     ) -> Decision:
-
-        status = (
-            self._map_decision_status(
-                data.get("status")
-            )
-        )
-
-        confidence = (
-            self._safe_confidence(
-                data.get(
-                    "confidence"
-                ),
-                0.0,
-            )
-        )
-
-        title = (
-            self._clean_string(
-                data.get("title")
-            )
-            or "Untitled decision"
-        )
-
-        description = (
-            self._clean_string(
-                data.get(
-                    "description"
-                )
-            )
-            or "No description available."
-        )
+        status = self._map_decision_status(data.get("status"))
+        confidence = self._safe_confidence(data.get("confidence"), 0.0)
+        title = self._clean_string(data.get("title")) or "Untitled decision"
+        description = self._clean_string(data.get("description")) or "No description available."
 
         return Decision(
             meeting_id=meeting_id,
@@ -840,55 +646,21 @@ unassigned
         meeting_id: UUID,
         data: dict[str, Any],
     ) -> Commitment:
-
-        strength = (
-            self._map_commitment_strength(
-                data.get("strength")
-            )
-        )
-
-        confidence = (
-            self._safe_confidence(
-                data.get(
-                    "confidence"
-                ),
-                0.0,
-            )
-        )
-
-        task = (
-            self._clean_string(
-                data.get("task")
-            )
-            or self._clean_string(
-                data.get("title")
-            )
-            or "Untitled commitment"
-        )
-
-        owner = self._clean_string(
-            data.get("owner")
-        )
-
-        deadline_text = (
-            self._clean_string(
-                data.get("deadline")
-            )
-        )
+        strength = self._map_commitment_strength(data.get("strength"))
+        confidence = self._safe_confidence(data.get("confidence"), 0.0)
+        task = self._clean_string(data.get("task")) or "Untitled commitment"
+        owner = self._clean_string(data.get("owner"))
+        deadline_text = self._clean_string(data.get("deadline_text") or data.get("deadline"))
 
         notes = None
-
         if owner:
-            notes = (
-                "Owner identified by AI: "
-                f"{owner}"
-            )
+            notes = f"Owner identified by AI: {owner}"
 
         return Commitment(
             meeting_id=meeting_id,
-            owner_id=None,
+            owner_id=None,  # Will be resolved by owner_resolution_service
             task=task,
-            deadline=None,
+            deadline=None,  # Parsed separately if needed
             deadline_text=deadline_text,
             strength=strength,
             status=CommitmentStatus.OPEN,
@@ -897,45 +669,24 @@ unassigned
         )
 
     # =========================================================
-    # DECISION EVIDENCE
+    # EVIDENCE LINKING
     # =========================================================
 
     def _create_decision_evidence(
         self,
         db: Session,
         meeting_id: UUID,
-        decisions: list[
-            tuple[
-                Decision,
-                dict[str, Any],
-            ]
-        ],
-        transcript_segments: list[
-            TranscriptSegment
-        ],
+        decisions: list[tuple[Decision, dict[str, Any]]],
+        transcript_segments: list[TranscriptSegment],
         output: list[Evidence],
     ) -> None:
-
         for decision, data in decisions:
-
-            evidence_text = (
-                self._clean_string(
-                    data.get(
-                        "evidence"
-                    )
-                )
-            )
-
+            evidence_text = self._clean_string(data.get("evidence"))
             if not evidence_text:
-                evidence_text = (
-                    decision.description
-                )
+                evidence_text = decision.description
 
-            segment = (
-                self._find_best_evidence_segment(
-                    evidence_text,
-                    transcript_segments,
-                )
+            segment = self._find_best_evidence_segment(
+                evidence_text, transcript_segments
             )
 
             if segment is None:
@@ -947,55 +698,28 @@ unassigned
                 decision_id=decision.id,
                 commitment_id=None,
                 evidence_type="decision",
-                snippet=self._make_snippet(
-                    segment.text
-                ),
+                snippet=self._make_snippet(segment.text),
                 confidence=decision.confidence,
             )
 
             db.add(evidence)
             output.append(evidence)
 
-    # =========================================================
-    # COMMITMENT EVIDENCE
-    # =========================================================
-
     def _create_commitment_evidence(
         self,
         db: Session,
         meeting_id: UUID,
-        commitments: list[
-            tuple[
-                Commitment,
-                dict[str, Any],
-            ]
-        ],
-        transcript_segments: list[
-            TranscriptSegment
-        ],
+        commitments: list[tuple[Commitment, dict[str, Any]]],
+        transcript_segments: list[TranscriptSegment],
         output: list[Evidence],
     ) -> None:
-
         for commitment, data in commitments:
-
-            evidence_text = (
-                self._clean_string(
-                    data.get(
-                        "evidence"
-                    )
-                )
-            )
-
+            evidence_text = self._clean_string(data.get("evidence"))
             if not evidence_text:
-                evidence_text = (
-                    commitment.task
-                )
+                evidence_text = commitment.task
 
-            segment = (
-                self._find_best_evidence_segment(
-                    evidence_text,
-                    transcript_segments,
-                )
+            segment = self._find_best_evidence_segment(
+                evidence_text, transcript_segments
             )
 
             if segment is None:
@@ -1007,38 +731,22 @@ unassigned
                 decision_id=None,
                 commitment_id=commitment.id,
                 evidence_type="commitment",
-                snippet=self._make_snippet(
-                    segment.text
-                ),
+                snippet=self._make_snippet(segment.text),
                 confidence=commitment.confidence,
             )
 
             db.add(evidence)
             output.append(evidence)
 
-    # =========================================================
-    # FIND EVIDENCE
-    # =========================================================
-
     def _find_best_evidence_segment(
         self,
         evidence_text: str,
-        transcript_segments: list[
-            TranscriptSegment
-        ],
-    ) -> (
-        TranscriptSegment | None
-    ):
-
+        transcript_segments: list[TranscriptSegment],
+    ) -> TranscriptSegment | None:
         if not transcript_segments:
             return None
 
-        evidence_tokens = set(
-            self._tokenize(
-                evidence_text
-            )
-        )
-
+        evidence_tokens = set(self._tokenize(evidence_text))
         if not evidence_tokens:
             return None
 
@@ -1046,24 +754,11 @@ unassigned
         best_score = 0.0
 
         for segment in transcript_segments:
-
-            segment_tokens = set(
-                self._tokenize(
-                    segment.text
-                )
-            )
-
+            segment_tokens = set(self._tokenize(segment.text))
             if not segment_tokens:
                 continue
 
-            overlap = (
-                len(
-                    evidence_tokens
-                    & segment_tokens
-                )
-                / len(evidence_tokens)
-            )
-
+            overlap = len(evidence_tokens & segment_tokens) / len(evidence_tokens)
             if overlap > best_score:
                 best_score = overlap
                 best_segment = segment
@@ -1082,342 +777,75 @@ unassigned
         db: Session,
         meeting_id: UUID,
     ) -> None:
-
         db.execute(
-            delete(Evidence).where(
-                Evidence.meeting_id
-                == meeting_id
-            )
+            delete(Evidence).where(Evidence.meeting_id == meeting_id)
         )
-
         db.execute(
-            delete(Commitment).where(
-                Commitment.meeting_id
-                == meeting_id
-            )
+            delete(Commitment).where(Commitment.meeting_id == meeting_id)
         )
-
         db.execute(
-            delete(Decision).where(
-                Decision.meeting_id
-                == meeting_id
-            )
+            delete(Decision).where(Decision.meeting_id == meeting_id)
         )
-
+        db.execute(
+            delete(MeetingEmbedding).where(MeetingEmbedding.meeting_id == meeting_id)
+        )
         db.flush()
 
     # =========================================================
-    # NORMALIZATION
+    # DEDUPLICATION
     # =========================================================
 
-    def _normalize_chunk_result(
+    def _deduplicate_commitments(
         self,
-        result: dict[str, Any],
-    ) -> dict[str, Any]:
-
-        return {
-            "summary": self._clean_string(
-                result.get(
-                    "summary"
-                )
-            ),
-            "key_topics": (
-                self._clean_string_list(
-                    result.get(
-                        "key_topics"
-                    )
-                )
-            ),
-            "decisions": (
-                self._normalize_decisions(
-                    result.get(
-                        "decisions"
-                    )
-                )
-            ),
-            "commitments": (
-                self._normalize_commitments(
-                    result.get(
-                        "commitments"
-                    )
-                )
-            ),
-        }
-
-    def _normalize_merged_result(
-        self,
-        result: dict[str, Any],
-    ) -> dict[str, Any]:
-
-        return {
-            "summary": self._clean_string(
-                result.get(
-                    "summary"
-                )
-            ),
-            "key_topics": (
-                self._clean_string_list(
-                    result.get(
-                        "key_topics"
-                    )
-                )
-            ),
-            "decisions": (
-                self._normalize_decisions(
-                    result.get(
-                        "decisions"
-                    )
-                )
-            ),
-            "commitments": (
-                self._normalize_commitments(
-                    result.get(
-                        "commitments"
-                    )
-                )
-            ),
-        }
-
-    # =========================================================
-    # NORMALIZE DECISIONS
-    # =========================================================
-
-    def _normalize_decisions(
-        self,
-        decisions: Any,
-    ) -> list[
-        dict[str, Any]
-    ]:
-
-        if not isinstance(
-            decisions,
-            list,
-        ):
-            return []
-
-        normalized = []
-
-        for item in decisions:
-
-            if not isinstance(
-                item,
-                dict,
-            ):
-                continue
-
-            normalized.append(
-                {
-                    "title": (
-                        self._clean_string(
-                            item.get(
-                                "title"
-                            )
-                        )
-                        or "Untitled decision"
-                    ),
-                    "description": (
-                        self._clean_string(
-                            item.get(
-                                "description"
-                            )
-                        )
-                        or "No description available."
-                    ),
-                    "status": (
-                        self._clean_string(
-                            item.get(
-                                "status"
-                            )
-                        )
-                        or "accepted"
-                    ).lower(),
-                    "confidence": (
-                        self._safe_confidence(
-                            item.get(
-                                "confidence"
-                            ),
-                            0.0,
-                        )
-                    ),
-                    "evidence": (
-                        self._clean_string(
-                            item.get(
-                                "evidence"
-                            )
-                        )
-                    ),
-                }
-            )
-
-        return normalized
-
-    # =========================================================
-    # NORMALIZE COMMITMENTS
-    # =========================================================
-
-    def _normalize_commitments(
-        self,
-        commitments: Any,
-    ) -> list[
-        dict[str, Any]
-    ]:
-
-        if not isinstance(
-            commitments,
-            list,
-        ):
-            return []
-
-        normalized = []
+        commitments: list[dict],
+    ) -> list[dict]:
+        result = []
+        seen = set()
 
         for item in commitments:
-
-            if not isinstance(
-                item,
-                dict,
-            ):
+            key_fields = [
+                self._clean_string(item.get("task")).lower(),
+                self._clean_string(item.get("owner")).lower(),
+            ]
+            key = "|".join(key_fields)
+            if not key or key in seen:
                 continue
+            seen.add(key)
+            result.append(item)
 
-            normalized.append(
-                {
-                    "task": (
-                        self._clean_string(
-                            item.get(
-                                "task"
-                            )
-                        )
-                        or self._clean_string(
-                            item.get(
-                                "title"
-                            )
-                        )
-                        or "Untitled commitment"
-                    ),
-                    "owner": (
-                        self._clean_string(
-                            item.get(
-                                "owner"
-                            )
-                        )
-                    ),
-                    "deadline": (
-                        self._clean_string(
-                            item.get(
-                                "deadline"
-                            )
-                        )
-                    ),
-                    "strength": (
-                        self._clean_string(
-                            item.get(
-                                "strength"
-                            )
-                        )
-                        or "unassigned"
-                    ).lower(),
-                    "confidence": (
-                        self._safe_confidence(
-                            item.get(
-                                "confidence"
-                            ),
-                            0.0,
-                        )
-                    ),
-                    "evidence": (
-                        self._clean_string(
-                            item.get(
-                                "evidence"
-                            )
-                        )
-                    ),
-                }
-            )
+        return result
 
-        return normalized
+    def _deduplicate_decisions(
+        self,
+        decisions: list[dict],
+    ) -> list[dict]:
+        result = []
+        seen = set()
 
-    # =========================================================
-    # ENUM MAPPING
-    # =========================================================
+        for item in decisions:
+            key_fields = [
+                self._clean_string(item.get("title")).lower(),
+                self._clean_string(item.get("description")).lower(),
+            ]
+            key = "|".join(key_fields)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(item)
 
-    @staticmethod
-    def _map_decision_status(
-        value: Any,
-    ) -> DecisionStatus:
-
-        normalized = str(
-            value or "accepted"
-        ).lower().strip()
-
-        mapping = {
-            "proposed":
-                DecisionStatus.PROPOSED,
-            "accepted":
-                DecisionStatus.ACCEPTED,
-            "rejected":
-                DecisionStatus.REJECTED,
-            "changed":
-                DecisionStatus.CHANGED,
-            "superseded":
-                DecisionStatus.SUPERSEDED,
-        }
-
-        return mapping.get(
-            normalized,
-            DecisionStatus.ACCEPTED,
-        )
-
-    @staticmethod
-    def _map_commitment_strength(
-        value: Any,
-    ) -> CommitmentStrength:
-
-        normalized = str(
-            value or "unassigned"
-        ).lower().strip()
-
-        mapping = {
-            "firm":
-                CommitmentStrength.FIRM,
-            "weak":
-                CommitmentStrength.WEAK,
-            "request":
-                CommitmentStrength.REQUEST,
-            "unassigned":
-                CommitmentStrength.UNASSIGNED,
-        }
-
-        return mapping.get(
-            normalized,
-            CommitmentStrength.UNASSIGNED,
-        )
+        return result
 
     # =========================================================
     # CONFIDENCE
     # =========================================================
 
     @staticmethod
-    def _safe_confidence(
-        value: Any,
-        default: float = 0.0,
-    ) -> float:
-
+    def _safe_confidence(value: Any, default: float = 0.0) -> float:
         try:
-            confidence = float(
-                value
-            )
-        except (
-            TypeError,
-            ValueError,
-        ):
+            confidence = float(value)
+        except (TypeError, ValueError):
             return default
-
-        return max(
-            0.0,
-            min(
-                1.0,
-                confidence,
-            ),
-        )
+        return max(0.0, min(1.0, confidence))
 
     def _calculate_overall_confidence(
         self,
@@ -1425,240 +853,87 @@ unassigned
         commitments: list[Commitment],
         evidence: list[Evidence],
     ) -> float:
-
         values: list[float] = []
 
         for decision in decisions:
-            values.append(
-                self._safe_confidence(
-                    decision.confidence
-                )
-            )
-
+            values.append(self._safe_confidence(decision.confidence))
         for commitment in commitments:
-            values.append(
-                self._safe_confidence(
-                    commitment.confidence
-                )
-            )
-
+            values.append(self._safe_confidence(commitment.confidence))
         for evidence_item in evidence:
-            values.append(
-                self._safe_confidence(
-                    evidence_item.confidence
-                )
-            )
+            values.append(self._safe_confidence(evidence_item.confidence))
 
         if not values:
             return 0.0
 
-        return round(
-            sum(values) / len(values),
-            4,
-        )
-
-    # =========================================================
-    # DEDUPLICATION
-    # =========================================================
-
-    def _deduplicate_items(
-        self,
-        items: list[
-            dict[str, Any]
-        ],
-        key_fields: list[str],
-    ) -> list[
-        dict[str, Any]
-    ]:
-
-        result: list[
-            dict[str, Any]
-        ] = []
-
-        seen: set[str] = set()
-
-        for item in items:
-
-            values = []
-
-            for field in key_fields:
-                values.append(
-                    self._clean_string(
-                        item.get(
-                            field
-                        )
-                    ).lower()
-                )
-
-            key = "|".join(values)
-
-            if not key:
-                continue
-
-            if key in seen:
-                continue
-
-            seen.add(key)
-            result.append(item)
-
-        return result
-
-    @staticmethod
-    def _deduplicate_strings(
-        values: list[str],
-    ) -> list[str]:
-
-        result = []
-        seen = set()
-
-        for value in values:
-
-            clean = value.strip()
-
-            if not clean:
-                continue
-
-            normalized = (
-                clean.lower()
-            )
-
-            if normalized in seen:
-                continue
-
-            seen.add(normalized)
-            result.append(clean)
-
-        return result
+        return round(sum(values) / len(values), 4)
 
     # =========================================================
     # SERIALIZATION
     # =========================================================
 
     @staticmethod
-    def _decision_to_dict(
-        decision: Decision,
-    ) -> dict[str, Any]:
-
+    def _decision_to_dict(decision: Decision) -> dict[str, Any]:
         return {
-            "id": str(
-                decision.id
-            ),
-            "meeting_id": str(
-                decision.meeting_id
-            ),
-            "title":
-                decision.title,
-            "description":
-                decision.description,
-            "status":
-                decision.status.value,
-            "confidence":
-                decision.confidence,
+            "id": str(decision.id),
+            "meeting_id": str(decision.meeting_id),
+            "title": decision.title,
+            "description": decision.description,
+            "status": decision.status.value,
+            "confidence": decision.confidence,
             "changed_from_decision_id": (
-                str(
-                    decision.changed_from_decision_id
-                )
-                if decision.changed_from_decision_id
-                else None
+                str(decision.changed_from_decision_id)
+                if decision.changed_from_decision_id else None
             ),
             "created_at": (
-                decision.created_at.isoformat()
-                if decision.created_at
-                else None
+                decision.created_at.isoformat() if decision.created_at else None
             ),
         }
 
     @staticmethod
-    def _commitment_to_dict(
-        commitment: Commitment,
-    ) -> dict[str, Any]:
-
+    def _commitment_to_dict(commitment: Commitment) -> dict[str, Any]:
         return {
-            "id": str(
-                commitment.id
-            ),
-            "meeting_id": str(
-                commitment.meeting_id
-            ),
+            "id": str(commitment.id),
+            "meeting_id": str(commitment.meeting_id),
             "owner_id": (
-                str(
-                    commitment.owner_id
-                )
-                if commitment.owner_id
-                else None
+                str(commitment.owner_id) if commitment.owner_id else None
             ),
-            "task":
-                commitment.task,
+            "task": commitment.task,
             "deadline": (
-                commitment.deadline.isoformat()
-                if commitment.deadline
-                else None
+                commitment.deadline.isoformat() if commitment.deadline else None
             ),
-            "deadline_text":
-                commitment.deadline_text,
-            "strength":
-                commitment.strength.value,
-            "status":
-                commitment.status.value,
-            "confidence":
-                commitment.confidence,
-            "notes":
-                commitment.notes,
+            "deadline_text": commitment.deadline_text,
+            "strength": commitment.strength.value,
+            "status": commitment.status.value,
+            "confidence": commitment.confidence,
+            "notes": commitment.notes,
             "created_at": (
-                commitment.created_at.isoformat()
-                if commitment.created_at
-                else None
+                commitment.created_at.isoformat() if commitment.created_at else None
             ),
             "updated_at": (
-                commitment.updated_at.isoformat()
-                if commitment.updated_at
-                else None
+                commitment.updated_at.isoformat() if commitment.updated_at else None
             ),
         }
 
     @staticmethod
-    def _evidence_to_dict(
-        evidence: Evidence,
-    ) -> dict[str, Any]:
-
+    def _evidence_to_dict(evidence: Evidence) -> dict[str, Any]:
         return {
-            "id": str(
-                evidence.id
-            ),
-            "meeting_id": str(
-                evidence.meeting_id
-            ),
+            "id": str(evidence.id),
+            "meeting_id": str(evidence.meeting_id),
             "transcript_segment_id": (
-                str(
-                    evidence.transcript_segment_id
-                )
-                if evidence.transcript_segment_id
-                else None
+                str(evidence.transcript_segment_id)
+                if evidence.transcript_segment_id else None
             ),
             "commitment_id": (
-                str(
-                    evidence.commitment_id
-                )
-                if evidence.commitment_id
-                else None
+                str(evidence.commitment_id) if evidence.commitment_id else None
             ),
             "decision_id": (
-                str(
-                    evidence.decision_id
-                )
-                if evidence.decision_id
-                else None
+                str(evidence.decision_id) if evidence.decision_id else None
             ),
-            "evidence_type":
-                evidence.evidence_type,
-            "snippet":
-                evidence.snippet,
-            "confidence":
-                evidence.confidence,
+            "evidence_type": evidence.evidence_type,
+            "snippet": evidence.snippet,
+            "confidence": evidence.confidence,
             "created_at": (
-                evidence.created_at.isoformat()
-                if evidence.created_at
-                else None
+                evidence.created_at.isoformat() if evidence.created_at else None
             ),
         }
 
@@ -1667,123 +942,49 @@ unassigned
     # =========================================================
 
     @staticmethod
-    def _clean_string(
-        value: Any,
-    ) -> str:
-
+    def _clean_string(value: Any) -> str:
         if value is None:
             return ""
-
-        if not isinstance(
-            value,
-            str,
-        ):
+        if not isinstance(value, str):
             value = str(value)
-
         return value.strip()
 
-    @classmethod
-    def _clean_string_list(
-        cls,
-        values: Any,
-    ) -> list[str]:
-
-        if not isinstance(
-            values,
-            list,
-        ):
-            return []
-
-        result = []
-
-        for value in values:
-
-            clean = cls._clean_string(
-                value
-            )
-
-            if clean:
-                result.append(
-                    clean
-                )
-
-        return cls._deduplicate_strings(
-            result
-        )
-
     @staticmethod
-    def _tokenize(
-        text: str,
-    ) -> list[str]:
-
+    def _tokenize(text: str) -> list[str]:
         if not text:
             return []
-
         import re
-
-        return re.findall(
-            r"[a-zA-Z0-9]+",
-            text.lower(),
-        )
+        return re.findall(r"[a-zA-Z0-9]+", text.lower())
 
     @staticmethod
-    def _make_snippet(
-        text: str,
-        max_length: int = 500,
-    ) -> str:
-
+    def _make_snippet(text: str, max_length: int = 500) -> str:
         text = text.strip()
-
         if len(text) <= max_length:
             return text
-
-        return (
-            text[
-                : max_length - 3
-            ].rstrip()
-            + "..."
-        )
+        return text[:max_length - 3].rstrip() + "..."
 
     @staticmethod
-    def _format_chunk(
-        chunk: list[
-            TranscriptSegment
-        ],
-    ) -> str:
-
-        lines = []
-
-        for segment in chunk:
-
-            speaker = (
-                segment.speaker_name
-                or segment.speaker_label
-                or "Speaker"
-            )
-
-            lines.append(
-                f"[{segment.start_time:.2f}s - "
-                f"{segment.end_time:.2f}s] "
-                f"{speaker}: "
-                f"{segment.text.strip()}"
-            )
-
-        return "\n".join(
-            lines
-        )
+    def _map_decision_status(value: Any) -> DecisionStatus:
+        normalized = str(value or "accepted").lower().strip()
+        mapping = {
+            "proposed": DecisionStatus.PROPOSED,
+            "accepted": DecisionStatus.ACCEPTED,
+            "rejected": DecisionStatus.REJECTED,
+            "changed": DecisionStatus.CHANGED,
+            "superseded": DecisionStatus.SUPERSEDED,
+        }
+        return mapping.get(normalized, DecisionStatus.ACCEPTED)
 
     @staticmethod
-    def _json_for_prompt(
-        value: Any,
-    ) -> str:
-
-        import json
-
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            indent=2,
-        )
+    def _map_commitment_strength(value: Any) -> CommitmentStrength:
+        normalized = str(value or "unassigned").lower().strip()
+        mapping = {
+            "firm": CommitmentStrength.FIRM,
+            "weak": CommitmentStrength.WEAK,
+            "request": CommitmentStrength.REQUEST,
+            "unassigned": CommitmentStrength.UNASSIGNED,
+        }
+        return mapping.get(normalized, CommitmentStrength.UNASSIGNED)
 
 
 analysis_service = AnalysisService()

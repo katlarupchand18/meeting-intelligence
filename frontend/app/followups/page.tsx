@@ -116,7 +116,7 @@ export default function FollowupsPage() {
   async function copyEmail() {
     try {
       await navigator.clipboard.writeText(
-        `Subject: ${subject}\\n\\n${body}`
+        `Subject: ${subject}\n\n${body}`
       );
       setCopied(true);
     } catch {
@@ -125,154 +125,163 @@ export default function FollowupsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl space-y-8 px-6 py-10">
-      <div>
-        <Link
-          href="/"
-          className="text-sm text-blue-600 hover:underline"
-        >
-          ← Dashboard
-        </Link>
+    <main className="page-wrapper">
+      <Link href="/" className="back-link">
+        ← Dashboard
+      </Link>
 
-        <h1 className="mt-4 text-3xl font-bold">
-          AI Meeting Follow-up Generator
-        </h1>
+      <h1>AI Meeting Follow-up Generator</h1>
 
-        <p className="mt-2 text-gray-600">
-          Generate an editable follow-up email from meeting
-          decisions, commitments, owners, and deadlines.
-        </p>
-      </div>
+      <p className="text-slate-500">
+        Generate an editable follow-up email from meeting
+        decisions, commitments, owners, and deadlines.
+      </p>
 
-      <section className="space-y-4 rounded-xl border p-6">
-        <label
-          htmlFor="meeting"
-          className="block font-semibold"
-        >
-          Select meeting
-        </label>
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">SELECT MEETING</span>
+            <h2>Choose a Meeting</h2>
+          </div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <label
+            htmlFor="meeting"
+            style={{ display: "block", fontWeight: 500, marginBottom: 8 }}
+          >
+            Select meeting
+          </label>
 
-        <select
-          id="meeting"
-          value={meetingId}
-          onChange={(event) => {
-            setMeetingId(event.target.value);
-            setResult(null);
-            setSubject("");
-            setBody("");
-            setCopied(false);
-          }}
-          disabled={loadingMeetings || generating}
-          className="w-full rounded-lg border p-3 text-gray-900"
-        >
-          {meetings.length === 0 && (
-            <option value="">
-              {loadingMeetings
-                ? "Loading meetings..."
-                : "No meetings available"}
-            </option>
+          <select
+            id="meeting"
+            value={meetingId}
+            onChange={(event) => {
+              setMeetingId(event.target.value);
+              setResult(null);
+              setSubject("");
+              setBody("");
+              setCopied(false);
+            }}
+            disabled={loadingMeetings || generating}
+            className="meeting-search"
+            style={{ minWidth: 300 }}
+          >
+            {meetings.length === 0 && (
+              <option value="">
+                {loadingMeetings
+                  ? "Loading meetings..."
+                  : "No meetings available"}
+              </option>
+            )}
+
+            {meetings.map((meeting) => (
+              <option key={meeting.id} value={meeting.id}>
+                {meeting.title}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={generateFollowup}
+            disabled={!meetingId || generating}
+            className="primary-button"
+            style={{ marginTop: 16 }}
+          >
+            {generating
+              ? "Generating email..."
+              : "Generate Follow-up Email"}
+          </button>
+
+          {generating && (
+            <p className="text-slate-500 mt-4">
+              AI is generating your draft. This may take
+              a few minutes.
+            </p>
           )}
 
-          {meetings.map((meeting) => (
-            <option key={meeting.id} value={meeting.id}>
-              {meeting.title}
-            </option>
-          ))}
-        </select>
-
-        <button
-          onClick={generateFollowup}
-          disabled={!meetingId || generating}
-          className="rounded-lg bg-blue-600 px-5 py-3 font-medium text-white disabled:opacity-50"
-        >
-          {generating
-            ? "Generating email..."
-            : "Generate Follow-up Email"}
-        </button>
-
-        {generating && (
-          <p className="text-sm text-gray-500">
-            Ollama is generating your draft. This may take
-            a few minutes.
-          </p>
-        )}
-
-        {error && (
-          <p role="alert" className="text-sm text-red-600">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p role="alert" className="meeting-alert meeting-alert-error" style={{ marginTop: 16 }}>
+              {error}
+            </p>
+          )}
+        </div>
       </section>
 
       {result && (
-        <section className="space-y-5 rounded-xl border p-6">
-          <div>
-            <h2 className="text-xl font-bold">
-              Generated Email
-            </h2>
+        <section className="meeting-card" style={{ marginTop: 24 }}>
+          <div className="meeting-card-heading">
+            <div>
+              <span className="eyebrow">GENERATED EMAIL</span>
+              <h2>Follow-up Draft</h2>
+            </div>
+          </div>
 
-            <p className="mt-1 text-sm text-amber-700">
+          <div style={{ marginTop: 16 }}>
+            <p className="text-sm text-amber-700 mb-4">
               AI-generated draft — review facts, dates,
               owners, and verification statuses before sending.
             </p>
-          </div>
 
-          <div className="flex flex-wrap gap-3 text-sm">
-            <span className="rounded bg-gray-100 px-3 py-2 text-gray-900">
-              Action items: {result.action_item_count}
-            </span>
-            <span className="rounded bg-gray-100 px-3 py-2 text-gray-900">
-              Overdue: {result.overdue_count}
-            </span>
-            <span className="rounded bg-gray-100 px-3 py-2 text-gray-900">
-              Decisions: {result.decision_count}
-            </span>
-          </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+              <span style={{ padding: "6px 12px", borderRadius: 6, background: "#f1f5f9", fontSize: 13 }}>
+                Action items: {result.action_item_count}
+              </span>
+              <span style={{ padding: "6px 12px", borderRadius: 6, background: "#fef2f2", color: "#991b1b", fontSize: 13 }}>
+                Overdue: {result.overdue_count}
+              </span>
+              <span style={{ padding: "6px 12px", borderRadius: 6, background: "#eff6ff", color: "#1d4ed8", fontSize: 13 }}>
+                Decisions: {result.decision_count}
+              </span>
+            </div>
 
-          <div>
-            <label
-              htmlFor="subject"
-              className="mb-2 block font-semibold"
+            <div style={{ marginBottom: 20 }}>
+              <label
+                htmlFor="subject"
+                style={{ display: "block", fontWeight: 500, marginBottom: 8 }}
+              >
+                Email subject
+              </label>
+              <input
+                id="subject"
+                value={subject}
+                onChange={(event) => {
+                  setSubject(event.target.value);
+                  setCopied(false);
+                }}
+                className="meeting-search"
+                style={{ fontSize: 16 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label
+                htmlFor="body"
+                style={{ display: "block", fontWeight: 500, marginBottom: 8 }}
+              >
+                Email body
+              </label>
+              <textarea
+                id="body"
+                value={body}
+                onChange={(event) => {
+                  setBody(event.target.value);
+                  setCopied(false);
+                }}
+                rows={18}
+                className="meeting-search"
+                style={{ fontFamily: "monospace", fontSize: 14, minHeight: 300 }}
+              />
+            </div>
+
+            <button
+              onClick={copyEmail}
+              disabled={!subject.trim() || !body.trim()}
+              className="primary-button"
+              style={{ background: "#10b981" }}
             >
-              Email subject
-            </label>
-            <input
-              id="subject"
-              value={subject}
-              onChange={(event) => {
-                setSubject(event.target.value);
-                setCopied(false);
-              }}
-              className="w-full rounded-lg border p-3 text-gray-900"
-            />
+              {copied ? "Copied!" : "Copy Email"}
+            </button>
           </div>
-
-          <div>
-            <label
-              htmlFor="body"
-              className="mb-2 block font-semibold"
-            >
-              Email body
-            </label>
-            <textarea
-              id="body"
-              value={body}
-              onChange={(event) => {
-                setBody(event.target.value);
-                setCopied(false);
-              }}
-              rows={18}
-              className="w-full rounded-lg border p-3 font-mono text-sm text-gray-900"
-            />
-          </div>
-
-          <button
-            onClick={copyEmail}
-            disabled={!subject.trim() || !body.trim()}
-            className="rounded-lg bg-green-600 px-5 py-3 font-medium text-white disabled:opacity-50"
-          >
-            {copied ? "Copied!" : "Copy Email"}
-          </button>
         </section>
       )}
     </main>

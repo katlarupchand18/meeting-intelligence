@@ -36,17 +36,27 @@ class EmbeddingService:
         except httpx.HTTPError:
             return False
 
-    async def create_embedding(self, text: str) -> list[float]:
-        """Generate a 768-dimensional vector using Ollama."""
+    async def create_embedding(self, text: str, is_query: bool = False) -> list[float]:
+        """Generate a 768-dimensional vector using Ollama.
+
+        Args:
+            text: Text to embed
+            is_query: If True, use 'search_query:' prefix for Nomic embeddings.
+                     If False, use 'search_document:' prefix for documents.
+        """
         if not text or not text.strip():
             raise ValueError("Cannot create an embedding from empty text.")
+
+        # Nomic-embed-text requires prefixes for optimal retrieval
+        prefix = "search_query: " if is_query else "search_document: "
+        prefixed_text = prefix + text.strip()
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
                 f"{self.base_url}/api/embed",
                 json={
                     "model": self.model,
-                    "input": text,
+                    "input": prefixed_text,
                 },
             )
             response.raise_for_status()
@@ -72,7 +82,7 @@ class EmbeddingService:
         content: str,
     ) -> MeetingEmbedding:
         """Generate and store one meeting-memory embedding."""
-        vector = await self.create_embedding(content)
+        vector = await self.create_embedding(content, is_query=False)
 
         record = MeetingEmbedding(
             meeting_id=meeting_id,
@@ -103,7 +113,7 @@ class EmbeddingService:
                 if not content or not content.strip():
                     continue
 
-                vector = await self.create_embedding(content)
+                vector = await self.create_embedding(content, is_query=False)
 
                 record = MeetingEmbedding(
                     meeting_id=meeting_id,
@@ -129,7 +139,7 @@ class EmbeddingService:
         db: Session,
         query: str,
         limit: int = 10,
-        similarity_threshold: float = 0.70,
+        similarity_threshold: float = 0.35,
         meeting_id: UUID | None = None,
     ) -> list[tuple[MeetingEmbedding, float]]:
         """Find semantically similar meeting memories."""
@@ -139,7 +149,7 @@ class EmbeddingService:
         if limit < 1:
             raise ValueError("Search limit must be at least 1.")
 
-        query_vector = await self.create_embedding(query)
+        query_vector = await self.create_embedding(query, is_query=True)
 
         distance = MeetingEmbedding.embedding.cosine_distance(
             query_vector

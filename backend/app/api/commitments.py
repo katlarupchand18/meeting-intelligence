@@ -258,6 +258,59 @@ def refresh_overdue(
 
 
 # ---------------------------------------------------------
+# Person-filtered Action Tracker
+# ---------------------------------------------------------
+@router.get("/tracker/person/{person_id}")
+def list_action_tracker_by_person(
+    person_id: UUID,
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import select
+    from app.models.commitment import Commitment
+    from app.models.meeting import Meeting
+    from app.models.participant import Participant
+
+    # Get all participants linked to this person
+    participants = db.scalars(
+        select(Participant).where(Participant.person_id == person_id)
+    ).all()
+
+    participant_ids = [p.id for p in participants]
+
+    if not participant_ids:
+        return []
+
+    rows = db.execute(
+        select(
+            Commitment,
+            Meeting.title,
+            Participant.name,
+        )
+        .join(Meeting, Commitment.meeting_id == Meeting.id)
+        .outerjoin(Participant, Commitment.owner_id == Participant.id)
+        .where(Commitment.owner_id.in_(participant_ids))
+        .order_by(Commitment.created_at.desc())
+        .limit(500)
+    ).all()
+
+    return [
+        {
+            "id": str(commitment.id),
+            "meeting_id": str(commitment.meeting_id),
+            "meeting_title": meeting_title,
+            "owner_id": str(commitment.owner_id) if commitment.owner_id else None,
+            "owner_name": owner_name,
+            "task": commitment.task,
+            "deadline": commitment.deadline.isoformat() if commitment.deadline else None,
+            "deadline_text": commitment.deadline_text,
+            "status": commitment.status.value,
+            "notes": commitment.notes,
+        }
+        for commitment, meeting_title, owner_name in rows
+    ]
+
+
+# ---------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------
 

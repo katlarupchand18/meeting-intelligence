@@ -17,9 +17,20 @@ router = APIRouter(prefix="/meetings", tags=["Transcript Upload"])
 
 MAX_BYTES = 2 * 1024 * 1024
 
-LINE_PATTERN = re.compile(
-    r"^(?:\[(?P<time>\d{1,2}:\d{2}(?::\d{2})?)\]\s*)?"
-    r"(?P<speaker>[^:\n]{1,100}):\s*(?P<text>.+)$"
+# Pattern for timestamped speaker lines: [HH:MM – HH:MM] Speaker Name:
+# or [HH:MM] Speaker Name:
+TIMESTAMP_SPEAKER_PATTERN = re.compile(
+    r"^\[(?P<start_time>\d{1,2}:\d{2}(?::\d{2})?)\s*[–-]\s*(?P<end_time>\d{1,2}:\d{2}(?::\d{2})?)\]\s*(?P<speaker>[^:\n]{1,100}):\s*$"
+)
+
+# Pattern for simple timestamped speaker lines: [HH:MM] Speaker Name:
+SIMPLE_TIMESTAMP_PATTERN = re.compile(
+    r"^\[(?P<time>\d{1,2}:\d{2}(?::\d{2})?)\]\s*(?P<speaker>[^:\n]{1,100}):\s*$"
+)
+
+# Pattern for speaker lines without timestamps: Speaker Name:
+SPEAKER_PATTERN = re.compile(
+    r"^(?P<speaker>[^:\n]{1,100}):\s*(?P<text>.+)$"
 )
 
 
@@ -36,24 +47,93 @@ def parse_time(value: str | None) -> float:
 
 
 def parse_transcript(content: str) -> list[dict]:
+    """
+    Parse transcript supporting multiple formats:
+    1. [HH:MM – HH:MM] Speaker Name:\nText on next line(s)
+    2. [MM:SS – MM:SS] Speaker Name:\nText on next line(s)
+    3. [HH:MM] Speaker Name:\nText on next line(s)
+    4. Speaker Name: Text on same line
+    5. Plain text lines (no speaker)
+    """
     segments = []
+    lines = content.splitlines()
+    i = 0
 
-    for line in content.splitlines():
-        line = line.strip()
+    while i < len(lines):
+        line = lines[i].rstrip()  # Keep leading spaces for pattern matching
 
-        if not line:
+        if not line.strip():
+            i += 1
             continue
 
-        match = LINE_PATTERN.match(line)
+        speaker = None
+        start_time = 0.0
+        end_time = 0.0
+        text = ""
 
+        # Try timestamp RANGE pattern FIRST (most specific): [HH:MM – HH:MM] Speaker: or [MM:SS – MM:SS] Speaker:
+        match = TIMESTAMP_SPEAKER_PATTERN.match(line)
         if match:
             speaker = match.group("speaker").strip()
+            start_time = parse_time(match.group("start_time"))
+            end_time = parse_time(match.group("end_time"))
+            # Text is on subsequent lines until next speaker/timestamp
+            i += 1
+            text_lines = []
+            while i < len(lines):
+                next_line = lines[i].rstrip()
+                if not next_line.strip():
+                    i += 1
+                    continue
+                # Check if next line is a new speaker/timestamp
+                next_stripped = next_line.strip()
+                if (TIMESTAMP_SPEAKER_PATTERN.match(next_stripped) or
+                    SIMPLE_TIMESTAMP_PATTERN.match(next_stripped) or
+                    SPEAKER_PATTERN.match(next_stripped)):
+                    break
+                text_lines.append(next_line.strip())
+                i += 1
+            text = " ".join(text_lines).strip()
+
+        # Try simple timestamp pattern: [HH:MM] Speaker: or [MM:SS] Speaker:
+        elif SIMPLE_TIMESTAMP_PATTERN.match(line.strip()):
+            match = SIMPLE_TIMESTAMP_PATTERN.match(line.strip())
+            speaker = match.group("speaker").strip()
+            start_time = parse_time(match.group("time"))
+            end_time = start_time
+            # Text is on subsequent lines
+            i += 1
+            text_lines = []
+            while i < len(lines):
+                next_line = lines[i].rstrip()
+                if not next_line.strip():
+                    i += 1
+                    continue
+                next_stripped = next_line.strip()
+                if (TIMESTAMP_SPEAKER_PATTERN.match(next_stripped) or
+                    SIMPLE_TIMESTAMP_PATTERN.match(next_stripped) or
+                    SPEAKER_PATTERN.match(next_stripped)):
+                    break
+                text_lines.append(next_line.strip())
+                i += 1
+            text = " ".join(text_lines).strip()
+
+        # Try speaker pattern: Speaker: Text (on same line)
+        elif SPEAKER_PATTERN.match(line.strip()):
+            match = SPEAKER_PATTERN.match(line.strip())
+            speaker = match.group("speaker").strip()
             text = match.group("text").strip()
-            start = parse_time(match.group("time"))
+            start_time = 0.0
+            end_time = 0.0
+            i += 1
+
+        # Plain text line (no speaker)
         else:
             speaker = None
-            text = line
-            start = 0.0
+            text = line.strip()
+            start_time = 0.0
+            end_time = 0.0
+            i += 1
 
         if not text:
             continue
@@ -61,8 +141,8 @@ def parse_transcript(content: str) -> list[dict]:
         segments.append({
             "speaker_name": speaker,
             "text": text,
-            "start_time": start,
-            "end_time": start,
+            "start_time": start_time,
+            "end_time": end_time,
             "sequence_number": len(segments) + 1,
         })
 

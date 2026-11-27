@@ -19,9 +19,9 @@ type Reminder = {
   verification_status: string | null;
 };
 
-type Preview = {
-  today: string;
-  days_ahead: number;
+type MeetingGroup = {
+  meeting_id: string;
+  meeting_title: string;
   counts: {
     overdue: number;
     upcoming: number;
@@ -32,7 +32,12 @@ type Preview = {
   upcoming: Reminder[];
   needs_deadline_review: Reminder[];
   no_deadline: Reminder[];
-  delivery_enabled: boolean;
+};
+
+type Preview = {
+  today: string;
+  days_ahead: number;
+  meetings: MeetingGroup[];
 };
 
 const sections = [
@@ -60,22 +65,42 @@ const sections = [
 
 export default function RemindersPage() {
   const [daysAhead, setDaysAhead] = useState(7);
+  const [meetingId, setMeetingId] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [meetings, setMeetings] = useState<Array<{id: string, title: string}>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dates, setDates] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
 
+  const loadMeetings = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/meetings?page=1&page_size=100`, { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        const items = Array.isArray(data) ? data : data.items ?? data.meetings ?? [];
+        setMeetings(items);
+      }
+    } catch (err) {
+      console.error('Failed to load meetings:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMeetings();
+  }, [loadMeetings]);
+
   const loadPreview = useCallback(async () => {
     setLoading(true);
     setError("");
 
     try {
-      const response = await fetch(
-        `${API}/api/reminders/preview?days_ahead=${daysAhead}`,
-        { cache: "no-store" }
-      );
+      let url = `${API}/api/reminders/by-meeting?days_ahead=${daysAhead}`;
+      if (meetingId) {
+        url += `&meeting_id=${meetingId}`;
+      }
+      const response = await fetch(url, { cache: "no-store" });
 
       if (!response.ok) {
         throw new Error("Unable to load reminder preview.");
@@ -95,7 +120,7 @@ export default function RemindersPage() {
 
   useEffect(() => {
     void loadPreview();
-  }, [loadPreview]);
+  }, [loadPreview, meetingId]);
 
   async function confirmDeadline(item: Reminder) {
     const selectedDate = dates[item.commitment_id];
@@ -151,178 +176,230 @@ export default function RemindersPage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl space-y-8 px-6 py-10">
-      <header>
-        <Link href="/" className="text-sm text-blue-600 hover:underline">
-          ← Dashboard
-        </Link>
+    <main className="page-wrapper">
+      <Link href="/" className="back-link">
+        ← Dashboard
+      </Link>
 
-        <h1 className="mt-4 text-3xl font-bold">
-          Commitment Reminders
-        </h1>
+      <h1>Commitment Reminders</h1>
 
-        <p className="mt-2 text-gray-600">
-          Review upcoming deadlines, overdue tasks, and
-          commitments requiring deadline clarification.
-        </p>
-      </header>
+      <p className="text-slate-500">
+        Review upcoming deadlines, overdue tasks, and
+        commitments requiring deadline clarification.
+      </p>
 
-      <section className="rounded-xl border p-5">
-        <p className="font-medium">Reminder preview only</p>
-        <p className="mt-2 text-sm text-gray-600">
-          No emails or notifications are sent.
-          Text-based deadlines require confirmation.
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">INFO</span>
+            <h2>Reminder Preview Only</h2>
+          </div>
+        </div>
+        <p className="text-sm text-slate-500" style={{ marginTop: 8 }}>
+          No emails or notifications are sent. Text-based deadlines require confirmation.
         </p>
       </section>
 
-      <section className="flex flex-wrap items-center gap-4">
-        <label htmlFor="days" className="font-medium">
-          Upcoming deadline window
-        </label>
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">FILTERS</span>
+            <h2>Reminder Settings</h2>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center", marginTop: 16 }}>
+          <label htmlFor="days" style={{ fontWeight: 500 }}>
+            Upcoming deadline window
+          </label>
 
-        <select
-          id="days"
-          value={daysAhead}
-          onChange={(event) =>
-            setDaysAhead(Number(event.target.value))
-          }
-          className="rounded-lg border p-3 text-gray-900"
-        >
-          <option value={3}>Next 3 days</option>
-          <option value={7}>Next 7 days</option>
-          <option value={14}>Next 14 days</option>
-          <option value={30}>Next 30 days</option>
-        </select>
+          <select
+            id="days"
+            value={daysAhead}
+            onChange={(event) =>
+              setDaysAhead(Number(event.target.value))
+            }
+            className="meeting-search"
+            style={{ minWidth: 180 }}
+          >
+            <option value={3}>Next 3 days</option>
+            <option value={7}>Next 7 days</option>
+            <option value={14}>Next 14 days</option>
+            <option value={30}>Next 30 days</option>
+          </select>
 
-        <button
-          type="button"
-          onClick={() => void loadPreview()}
-          className="rounded-lg bg-indigo-600 px-4 py-3 font-medium text-white"
-        >
-          Refresh
-        </button>
+          <button
+            type="button"
+            onClick={() => void loadPreview()}
+            className="primary-button"
+          >
+            Refresh
+          </button>
+        </div>
       </section>
 
       {message && (
-        <p role="status" className="rounded-lg border p-3">
+        <p role="status" className="meeting-alert meeting-alert-success" style={{ marginTop: 16 }}>
           {message}
         </p>
       )}
 
-      {loading && <p>Loading reminders...</p>}
-
       {error && (
-        <p role="alert" className="text-red-600">
+        <p role="alert" className="meeting-alert meeting-alert-error" style={{ marginTop: 16 }}>
           {error}
         </p>
       )}
 
+      {loading && (
+        <p className="text-slate-500 mt-8">Loading reminders...</p>
+      )}
+
       {preview && !loading && (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {sections.map((section) => (
-              <div
-                key={section.key}
-                className="rounded-xl border p-5"
-              >
-                <p className="text-sm text-gray-500">
-                  {section.title}
-                </p>
-                <p className="mt-2 text-3xl font-bold">
-                  {preview.counts[section.key]}
-                </p>
+          <section className="meeting-card" style={{ marginTop: 24 }}>
+            <div className="meeting-card-heading">
+              <div>
+                <span className="eyebrow">FILTER</span>
+                <h2>Filter by Meeting</h2>
               </div>
-            ))}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <label htmlFor="meeting-filter" style={{ fontWeight: 500, display: "block", marginBottom: 8 }}>
+                Filter by meeting
+              </label>
+              <select
+                id="meeting-filter"
+                value={meetingId}
+                onChange={(event) => setMeetingId(event.target.value)}
+                className="meeting-search"
+                style={{ minWidth: 300 }}
+              >
+                <option value="">All meetings</option>
+                {meetings.map((meeting) => (
+                  <option key={meeting.id} value={meeting.id}>
+                    {meeting.title}
+                  </option>
+                ))}
+              </select>
+            </div>
           </section>
 
-          {sections.map((section) => (
-            <section key={section.key} className="space-y-4">
-              <div>
-                <h2 className="text-xl font-bold">
-                  {section.title}
-                </h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  {section.description}
-                </p>
-              </div>
+          {preview.meetings.length === 0 && (
+            <p className="text-slate-500 text-center mt-8 py-12">
+              No active commitments found for the selected period.
+            </p>
+          )}
 
-              {preview[section.key].length === 0 && (
-                <p className="rounded-xl border p-5 text-gray-500">
-                  No commitments in this category.
-                </p>
-              )}
-
-              {preview[section.key].map((item) => (
-                <article
-                  key={item.commitment_id}
-                  className="rounded-xl border p-5"
+          {preview.meetings.map((meetingGroup) => (
+            <section key={meetingGroup.meeting_id} className="meeting-card" style={{ marginTop: 24 }}>
+              <div className="meeting-card-heading">
+                <div>
+                  <span className="eyebrow">MEETING</span>
+                  <h2>{meetingGroup.meeting_title}</h2>
+                </div>
+                <Link
+                  href={`/meetings/${meetingGroup.meeting_id}`}
+                  className="primary-button"
+                  style={{ fontSize: 14, padding: "8px 16px" }}
                 >
-                  <p className="font-semibold">{item.task}</p>
+                  View Meeting →
+                </Link>
+              </div>
+              <p className="text-sm text-slate-500" style={{ marginTop: 8 }}>
+                {meetingGroup.counts.overdue} overdue, {meetingGroup.counts.upcoming} upcoming, {meetingGroup.counts.needs_deadline_review} need review, {meetingGroup.counts.no_deadline} no deadline
+              </p>
 
-                  <p className="mt-2 text-sm text-gray-600">
-                    Meeting: {item.meeting_title || "Unknown"}
-                  </p>
+              {sections.map((section) => {
+                const items = meetingGroup[section.key as keyof MeetingGroup];
+                if (!Array.isArray(items) || items.length === 0) return null;
+                return (
+                  <div key={section.key} style={{ marginTop: 20 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+                      {section.title} ({items.length})
+                    </h3>
+                    {items.map((item) => (
+                      <article
+                        key={item.commitment_id}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          padding: 20,
+                          borderRadius: 8,
+                          marginTop: 12,
+                          background: "#fff",
+                        }}
+                      >
+                        <p style={{ fontWeight: 600 }}>{item.task}</p>
 
-                  <p className="text-sm text-gray-600">
-                    Owner: {item.owner_name || "Unassigned"}
-                  </p>
+                        <p style={{ marginTop: 8, fontSize: 14, color: "#64748b" }}>
+                          Owner: {item.owner_name || "Unassigned"}
+                        </p>
 
-                  <p className="text-sm text-gray-600">
-                    Deadline:{" "}
-                    {item.deadline ||
-                      item.deadline_text ||
-                      "Not specified"}
-                  </p>
+                        <p style={{ marginTop: 4, fontSize: 14, color: "#64748b" }}>
+                          Deadline:{" "}
+                          {item.deadline ||
+                            item.deadline_text ||
+                            "Not specified"}
+                        </p>
 
-                  <p className="mt-2 text-xs text-gray-500">
-                    Status: {item.status} · Verification:{" "}
-                    {item.verification_status || "Unknown"}
-                  </p>
+                        <p style={{ marginTop: 8, fontSize: 12, color: "#94a3b8" }}>
+                          Status: {item.status} · Verification:{" "}
+                          {item.verification_status || "Unknown"}
+                        </p>
 
-                  {item.verification_status !== "approved" &&
-                    item.verification_status !== "rejected" && (
-                      <div className="mt-4 flex flex-wrap items-center gap-3">
-                        <label
-                          htmlFor={`deadline-${item.commitment_id}`}
-                          className="text-sm font-medium"
-                        >
-                          Confirm deadline
-                        </label>
+                        {item.verification_status !== "approved" &&
+                          item.verification_status !== "rejected" && (
+                            <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                              <label
+                                htmlFor={`deadline-${item.commitment_id}`}
+                                style={{ fontSize: 14, fontWeight: 500 }}
+                              >
+                                Confirm deadline
+                              </label>
 
-                        <input
-                          id={`deadline-${item.commitment_id}`}
-                          type="date"
-                          value={
-                            dates[item.commitment_id] ||
-                            item.deadline ||
-                            ""
-                          }
-                          onChange={(event) =>
-                            setDates((current) => ({
-                              ...current,
-                              [item.commitment_id]: event.target.value,
-                            }))
-                          }
-                          className="rounded-lg border p-2 text-gray-900"
-                        />
+                              <input
+                                id={`deadline-${item.commitment_id}`}
+                                type="date"
+                                value={
+                                  dates[item.commitment_id] ||
+                                  item.deadline ||
+                                  ""
+                                }
+                                onChange={(event) =>
+                                  setDates((current) => ({
+                                    ...current,
+                                    [item.commitment_id]: event.target.value,
+                                  }))
+                                }
+                                style={{
+                                  padding: "8px 12px",
+                                  border: "1px solid #cbd5e1",
+                                  borderRadius: 8,
+                                  color: "inherit",
+                                  background: "transparent",
+                                  fontSize: 14,
+                                }}
+                              />
 
-                        <button
-                          type="button"
-                          disabled={
-                            savingId !== null ||
-                            !dates[item.commitment_id]
-                          }
-                          onClick={() => void confirmDeadline(item)}
-                          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                        >
-                          {savingId === item.commitment_id
-                            ? "Saving..."
-                            : "Confirm Deadline"}
-                        </button>
-                      </div>
-                    )}
-                </article>
-              ))}
+                              <button
+                                type="button"
+                                disabled={
+                                  savingId !== null ||
+                                  !dates[item.commitment_id]
+                                }
+                                onClick={() => void confirmDeadline(item)}
+                                className="primary-button"
+                                style={{ padding: "8px 16px", fontSize: 14 }}
+                              >
+                                {savingId === item.commitment_id
+                                  ? "Saving..."
+                                  : "Confirm Deadline"}
+                              </button>
+                            </div>
+                          )}
+                      </article>
+                    ))}
+                  </div>
+                )
+              })}
             </section>
           ))}
         </>

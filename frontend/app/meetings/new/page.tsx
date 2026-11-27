@@ -8,6 +8,7 @@ import {
   type DragEvent,
 } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -301,334 +302,365 @@ export default function NewMeetingPage() {
   }
 
   return (
-    <main className="upload-page-redesigned">
-      {/* Page content */}
-      <section className="upload-content-redesigned">
-        <div className="mb-8">
-          <div className="mb-3 inline-flex rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            New Meeting
-          </div>
+    <main className="page-wrapper">
+      <Link href="/" className="back-link">
+        ← Dashboard
+      </Link>
 
-          <h2 className="text-3xl font-bold tracking-tight">
-            Add a meeting recording
-          </h2>
+      <h1>Add a Meeting Recording</h1>
 
-          <p className="mt-2 text-slate-500">
-            Upload a meeting recording to extract the conversation, speakers,
-            decisions, commitments, evidence, and accountability information.
-          </p>
-        </div>
+      <p className="text-slate-500">
+        Upload a meeting recording to extract the conversation, speakers,
+        decisions, commitments, evidence, and accountability information.
+      </p>
 
-        <form onSubmit={createMeeting} className="space-y-6">
-          {/* Meeting information */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-5 text-lg font-semibold">
-              Meeting information
-            </h3>
-
-            <div className="grid gap-5 md:grid-cols-2">
-              <div className="md:col-span-2">
-                <label
-                  htmlFor="meeting-title"
-                  className="mb-2 block text-sm font-medium text-slate-700"
-                >
-                  Meeting title <span className="text-red-400">*</span>
-                </label>
-
-                <input
-                  id="meeting-title"
-                  type="text"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="e.g. Project Review Meeting"
-                  maxLength={200}
-                  required
-                  disabled={loading}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500/60 disabled:opacity-60"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="meeting-type"
-                  className="mb-2 block text-sm font-medium text-slate-700"
-                >
-                  Meeting type
-                </label>
-
-                <select
-                  id="meeting-type"
-                  value={meetingType}
-                  onChange={(event) => setMeetingType(event.target.value)}
-                  disabled={loading}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-blue-500/60 disabled:opacity-60"
-                >
-                  {MEETING_TYPES.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="meeting-description"
-                  className="mb-2 block text-sm font-medium text-slate-700"
-                >
-                  Description
-                </label>
-
-                <input
-                  id="meeting-description"
-                  type="text"
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Optional description"
-                  maxLength={2000}
-                  disabled={loading}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500/60 disabled:opacity-60"
-                />
-              </div>
+      <form onSubmit={createMeeting} style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Meeting information */}
+        <section className="meeting-card">
+          <div className="meeting-card-heading">
+            <div>
+              <span className="eyebrow">MEETING INFO</span>
+              <h2>Meeting Information</h2>
             </div>
           </div>
+          <div style={{ marginTop: 16, display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label
+                htmlFor="meeting-title"
+                style={{ display: "block", fontSize: 14, fontWeight: 500, marginBottom: 6, color: "#374151" }}
+              >
+                Meeting title <span style={{ color: "#ef4444" }}> *</span>
+              </label>
 
-          
-            {/* Input method selector */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="mb-4 text-lg font-semibold">
-                Choose input method
-              </h3>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                {([
-                  ["recording", "🎙️ Audio / Video"],
-                  ["file", "📄 Transcript File"],
-                  ["paste", "✍️ Paste Transcript"],
-                ] as const).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      setInputMode(mode);
-                      setError("");
-                      setSuccess("");
-                    }}
-                    className={`rounded-xl border px-4 py-4 text-sm font-medium transition ${
-                      inputMode === mode
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {inputMode === "recording" && (
-              <>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-2 text-lg font-semibold">Recording</h3>
-
-            <p className="mb-5 text-sm text-slate-500">
-              Select an audio or video file from your computer.
-            </p>
-
-            <label
-              onDragOver={(event) => {
-                event.preventDefault();
-                if (!loading) setDragging(true);
-              }}
-              onDragLeave={(event) => {
-                event.preventDefault();
-                setDragging(false);
-              }}
-              onDrop={handleDrop}
-              className={`flex min-h-[250px] flex-col items-center justify-center rounded-2xl border border-dashed p-8 text-center transition ${
-                loading ? "cursor-not-allowed opacity-60" : "cursor-pointer"
-              } ${
-                dragging
-                  ? "border-blue-500 bg-blue-50"
-                  : "border-blue-200 bg-blue-50/40 hover:border-blue-400 hover:bg-blue-50"
-              }`}
-            >
               <input
-                ref={fileInputRef}
-                type="file"
-                accept={ACCEPTED_EXTENSIONS.join(",")}
-                onChange={handleFileChange}
+                id="meeting-title"
+                type="text"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="e.g. Project Review Meeting"
+                maxLength={200}
+                required
                 disabled={loading}
-                className="hidden"
+                className="meeting-search"
+                style={{ fontSize: 16 }}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="meeting-type"
+                style={{ display: "block", fontSize: 14, fontWeight: 500, marginBottom: 6, color: "#374151" }}
+              >
+                Meeting type
+              </label>
+
+              <select
+                id="meeting-type"
+                value={meetingType}
+                onChange={(event) => setMeetingType(event.target.value)}
+                disabled={loading}
+                className="meeting-search"
+                style={{ fontSize: 16 }}
+              >
+                {MEETING_TYPES.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="meeting-description"
+                style={{ display: "block", fontSize: 14, fontWeight: 500, marginBottom: 6, color: "#374151" }}
+              >
+                Description
+              </label>
+
+              <input
+                id="meeting-description"
+                type="text"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="Optional description"
+                maxLength={2000}
+                disabled={loading}
+                className="meeting-search"
+                style={{ fontSize: 16 }}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Input method selector */}
+        <section className="meeting-card">
+          <div className="meeting-card-heading">
+            <div>
+              <span className="eyebrow">INPUT METHOD</span>
+              <h2>Choose Input Method</h2>
+            </div>
+          </div>
+          <div style={{ marginTop: 16, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+            {([
+              ["recording", "🎙️ Audio / Video"],
+              ["file", "📄 Transcript File"],
+              ["paste", "✍️ Paste Transcript"],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setInputMode(mode);
+                  setError("");
+                  setSuccess("");
+                }}
+                style={{
+                  padding: "16px 20px",
+                  borderRadius: 12,
+                  border: "2px solid",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  background: inputMode === mode ? "#eff6ff" : "#fff",
+                  color: inputMode === mode ? "#1d4ed8" : "#475569",
+                  borderColor: inputMode === mode ? "#3b82f6" : "#e2e8f0",
+                  transition: "all 0.2s",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {inputMode === "recording" && (
+          <section className="meeting-card">
+            <div className="meeting-card-heading">
+              <div>
+                <span className="eyebrow">RECORDING</span>
+                <h2>Upload Recording</h2>
+              </div>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <p style={{ fontSize: 14, color: "#64748b", marginBottom: 16 }}>
+                Select an audio or video file from your computer.
+              </p>
+
+              <label
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  if (!loading) setDragging(true);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  setDragging(false);
+                }}
+                onDrop={handleDrop}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: 250,
+                  borderRadius: 16,
+                  border: "2px dashed",
+                  padding: 32,
+                  textAlign: "center",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  borderColor: dragging ? "#3b82f6" : loading ? "#cbd5e1" : "#94a3b8",
+                  background: dragging ? "#eff6ff" : loading ? "#f8fafc" : "#fafafa",
+                  transition: "all 0.2s",
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPTED_EXTENSIONS.join(",")}
+                  onChange={handleFileChange}
+                  disabled={loading}
+                  className="hidden"
+                />
+
+                <div style={{ marginBottom: 16, width: 64, height: 64, borderRadius: 16, background: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32 }}>
+                  🎙️
+                </div>
+
+                {file ? (
+                  <>
+                    <p style={{ wordBreak: "break-all", fontWeight: 500, color: "#1e293b" }}>
+                      {file.name}
+                    </p>
+
+                    <p style={{ marginTop: 8, fontSize: 14, color: "#64748b" }}>
+                      {formatFileSize(file.size)}
+                    </p>
+
+                    <span style={{ marginTop: 16, display: "inline-block", padding: "8px 16px", borderRadius: 8, background: "#f1f5f9", fontSize: 13, color: "#64748b" }}>
+                      {loading ? "Uploading file..." : "Click to choose another file"}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <p style={{ fontWeight: 500, color: "#1e293b" }}>
+                      Drop your recording here
+                    </p>
+
+                    <p style={{ marginTop: 8, fontSize: 14, color: "#64748b" }}>
+                      or click to browse your computer
+                    </p>
+
+                    <span style={{ marginTop: 16, display: "inline-block", fontSize: 12, color: "#94a3b8" }}>
+                      MP3 · WAV · M4A · AAC · FLAC · OGG · MP4 · MOV · WEBM · AVI · MKV
+                    </span>
+                  </>
+                )}
+              </label>
+
+              {loading && (
+                <div style={{ marginTop: 20 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 8 }}>
+                    <span style={{ color: "#64748b" }}>Sending recording...</span>
+                    <span style={{ color: "#3b82f6" }}>
+                      {progress === 100 ? "Complete" : "Please wait"}
+                    </span>
+                  </div>
+
+                  <div style={{ height: 8, borderRadius: 9999, background: "#e2e8f0", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        borderRadius: 9999,
+                        background: "linear-gradient(90deg, #3b82f6, #2563eb)",
+                        width: progress === 100 ? "100%" : "33%",
+                        transition: "width 0.3s",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {inputMode === "file" && (
+          <section className="meeting-card">
+            <div className="meeting-card-heading">
+              <div>
+                <span className="eyebrow">TRANSCRIPT FILE</span>
+                <h2>Upload Transcript</h2>
+              </div>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <p style={{ fontSize: 14, color: "#64748b", marginBottom: 16 }}>
+                UTF-8 .txt files only, maximum 2 MB.
+              </p>
+
+              <input
+                type="file"
+                accept=".txt,text/plain"
+                disabled={loading}
+                onChange={(event) => {
+                  const selected = event.target.files?.[0];
+                  if (selected) validateTranscriptFile(selected);
+                  event.target.value = "";
+                }}
+                className="meeting-search"
+                style={{ padding: 16 }}
               />
 
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-500/10 text-3xl">
-                🎙️
-              </div>
-
-              {file ? (
-                <>
-                  <p className="break-all font-medium text-slate-800">
-                    {file.name}
-                  </p>
-
-                  <p className="mt-2 text-sm text-slate-500">
-                    {formatFileSize(file.size)}
-                  </p>
-
-                  <span className="mt-4 rounded-lg bg-slate-100 px-4 py-2 text-xs text-slate-500">
-                    {loading
-                      ? "Uploading file..."
-                      : "Click to choose another file"}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <p className="font-medium text-slate-800">
-                    Drop your recording here
-                  </p>
-
-                  <p className="mt-2 text-sm text-slate-500">
-                    or click to browse your computer
-                  </p>
-
-                  <span className="mt-4 text-xs text-slate-400">
-                    MP3 · WAV · M4A · AAC · FLAC · OGG · MP4 · MOV · WEBM · AVI
-                    · MKV
-                  </span>
-                </>
+              {transcriptFile && (
+                <p style={{ marginTop: 12, fontSize: 14, color: "#2563eb" }}>
+                  Selected: {transcriptFile.name} ({formatFileSize(transcriptFile.size)})
+                </p>
               )}
-            </label>
-
-            {loading && (
-              <div className="mt-5">
-                <div className="mb-2 flex justify-between text-sm">
-                  <span className="text-slate-500">Sending recording...</span>
-                  <span className="text-blue-300">
-                    {progress === 100 ? "Complete" : "Please wait"}
-                  </span>
-                </div>
-
-                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    className={`h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 ${
-                      progress === 100
-                        ? "w-full"
-                        : "w-1/3 animate-pulse"
-                    }`}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          
-              </>
-            )}
-
-            {inputMode === "file" && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="mb-2 text-lg font-semibold">
-                  Upload transcript
-                </h3>
-                <p className="mb-4 text-sm text-slate-500">
-                  UTF-8 .txt files only, maximum 2 MB.
-                </p>
-
-                <input
-                  type="file"
-                  accept=".txt,text/plain"
-                  disabled={loading}
-                  onChange={(event) => {
-                    const selected = event.target.files?.[0];
-                    if (selected) validateTranscriptFile(selected);
-                    event.target.value = "";
-                  }}
-                  className="block w-full rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
-                />
-
-                {transcriptFile && (
-                  <p className="mt-3 text-sm text-blue-700">
-                    Selected: {transcriptFile.name} ({formatFileSize(transcriptFile.size)})
-                  </p>
-                )}
-              </div>
-            )}
-
-            {inputMode === "paste" && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="mb-2 text-lg font-semibold">
-                  Paste transcript
-                </h3>
-                <p className="mb-4 text-sm text-slate-500">
-                  Paste the conversation from your meeting.
-                </p>
-
-                <textarea
-                  value={transcriptText}
-                  onChange={(event) => setTranscriptText(event.target.value)}
-                  disabled={loading}
-                  rows={12}
-                  placeholder={"[00:00] Alice: Let's review the project.\n[00:15] Bob: I'll finish the report by Friday."}
-                  className="w-full resize-y rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500"
-                />
-
-                <p className="mt-2 text-xs text-slate-500">
-                  {new TextEncoder().encode(transcriptText).length.toLocaleString()} / 2,097,152 bytes
-                </p>
-              </div>
-            )}
-
-{/* Error message */}
-          {error && (
-            <div
-              role="alert"
-              className="break-words rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700"
-            >
-              <p className="mb-1 font-semibold">Unable to create meeting</p>
-              <p>{error}</p>
             </div>
-          )}
+          </section>
+        )}
 
-          {/* Success message */}
-          {success && (
-            <div
-              role="status"
-              className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700"
-            >
-              {success}
+        {inputMode === "paste" && (
+          <section className="meeting-card">
+            <div className="meeting-card-heading">
+              <div>
+                <span className="eyebrow">PASTE TRANSCRIPT</span>
+                <h2>Paste Transcript</h2>
+              </div>
             </div>
-          )}
+            <div style={{ marginTop: 16 }}>
+              <p style={{ fontSize: 14, color: "#64748b", marginBottom: 16 }}>
+                Paste the conversation from your meeting.
+              </p>
 
-          {/* Actions */}
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => router.push("/")}
-              disabled={loading}
-              className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancel
-            </button>
+              <textarea
+                value={transcriptText}
+                onChange={(event) => setTranscriptText(event.target.value)}
+                disabled={loading}
+                rows={12}
+                placeholder="[00:00] Alice: Let's review the project.\n[00:15] Bob: I'll finish the report by Friday."
+                className="meeting-search"
+                style={{ fontFamily: "monospace", fontSize: 14, minHeight: 200 }}
+              />
 
-            <button
-              type="submit"
-              disabled={
-                  loading ||
-                  !title.trim() ||
-                  (inputMode === "recording" && !file) ||
-                  (inputMode === "file" && !transcriptFile) ||
-                  (inputMode === "paste" && !transcriptText.trim())
-                }
-              className="rounded-xl bg-blue-600 text-white px-6 py-3 text-sm font-semibold shadow-lg shadow-blue-600/20 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
-            >
-              {loading ? "Uploading..." : "Create Meeting →"}
-            </button>
-          </div>
-        </form>
-      </section>
+              <p style={{ marginTop: 8, fontSize: 12, color: "#94a3b8" }}>
+                {new TextEncoder().encode(transcriptText).length.toLocaleString()} / 2,097,152 bytes
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* Error message */}
+        {error && (
+          <p role="alert" className="meeting-alert meeting-alert-error">
+            <strong>Unable to create meeting</strong>
+            <p style={{ marginTop: 4 }}>{error}</p>
+          </p>
+        )}
+
+        {/* Success message */}
+        {success && (
+          <p role="status" className="meeting-alert meeting-alert-success">
+            {success}
+          </p>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            disabled={loading}
+            style={{
+              padding: "12px 20px",
+              borderRadius: 12,
+              border: "1px solid #cbd5e1",
+              background: "#fff",
+              color: "#374151",
+              fontSize: 14,
+              fontWeight: 500,
+              cursor: loading ? "not-allowed" : "pointer",
+              opacity: loading ? 0.5 : 1,
+            }}
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            disabled={
+              loading ||
+              !title.trim() ||
+              (inputMode === "recording" && !file) ||
+              (inputMode === "file" && !transcriptFile) ||
+              (inputMode === "paste" && !transcriptText.trim())
+            }
+            className="primary-button"
+            style={{ padding: "12px 24px", fontSize: 14, fontWeight: 600 }}
+          >
+            {loading ? "Uploading..." : "Create Meeting →"}
+          </button>
+        </div>
+      </form>
     </main>
   );
 }

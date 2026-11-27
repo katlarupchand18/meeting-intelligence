@@ -15,16 +15,35 @@ class Settings(BaseSettings):
         "meeting_intelligence"
     )
 
-    # AI
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    # AI Provider Configuration
+    # Options: "ollama" (default), "groq", "openai"
+    AI_PROVIDER: str = "ollama"
+    AI_FALLBACK_PROVIDER: str = "ollama"
+    ALLOW_CLOUD_AI: bool = False
 
-    # Local Ollama
+    # Groq Configuration
+    GROQ_API_KEY: str = ""
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+    GROQ_CHAT_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_ANALYSIS_MODEL: str = "llama-3.3-70b-versatile"
+
+    # Local Ollama Configuration
     OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
     OLLAMA_MODEL: str = "qwen3:4b"
+    OLLAMA_FAST_MODEL: str = "llama3.2:3b"
+    OLLAMA_NUM_CTX: int = 8192
+    OLLAMA_NUM_PREDICT: int = 2048
+    OLLAMA_THINK: bool = False
 
-    # Embeddings
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    # OpenAI (legacy compatibility)
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    USE_CLOUD_AI: bool = False
+
+    # Embeddings - using local Nomic via Ollama
+    EMBEDDING_MODEL: str = "nomic-embed-text"
+    EMBEDDING_DIMENSIONS: int = 768
 
     # Speech-to-text
     WHISPER_MODEL: str = "small"
@@ -58,6 +77,10 @@ class Settings(BaseSettings):
     # Processing
     MAX_TRANSCRIPT_SEGMENTS: int = 10000
     MAX_MEETING_TITLE_LENGTH: int = 255
+
+    # NLP Processing
+    SPACY_MODEL: str = "en_core_web_sm"
+    NLP_BATCH_SIZE: int = 32
 
     model_config = SettingsConfigDict(
         env_file=".env",

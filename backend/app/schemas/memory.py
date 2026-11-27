@@ -23,7 +23,7 @@ class MemorySearchRequest(BaseModel):
     )
 
     similarity_threshold: float = Field(
-        default=0.70,
+        default=0.35,
         ge=0.0,
         le=1.0,
     )
