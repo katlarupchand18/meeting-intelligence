@@ -4,445 +4,294 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 const API =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-type Meeting = {
-  id: string;
-  title: string;
+type Summary = {
+  total_commitments: number;
+  completed: number;
+  in_progress: number;
+  blocked: number;
+  pending: number;
+  overdue: number;
+  cancelled: number;
+  unassigned: number;
+  completion_rate: number;
+  overdue_rate: number;
+  total_meetings: number;
+  meetings_with_commitments: number;
 };
 
-type Participant = {
-  id: string;
+type MeetingStat = {
   meeting_id: string;
-  name: string;
-  role: string | null;
-  speaker_label: string | null;
+  meeting_title: string;
+  total_commitments: number;
+  completed: number;
+  overdue: number;
+  completion_rate: number;
 };
 
-type Task = {
-  id: string;
-  task: string;
-  status: string;
-  deadline: string | null;
-  deadline_text: string | null;
-  overdue: boolean;
-  verification_status: string;
+type WorkloadStat = {
+  person_id: string;
+  person_name: string;
+  total_commitments: number;
+  completed: number;
+  overdue: number;
+  completion_rate: number;
 };
 
-type Decision = {
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  verification_status: string;
+type InsightsData = {
+  summary: Summary;
+  meetings: MeetingStat[];
+  workload: WorkloadStat[];
 };
 
-type Insights = {
-  participant: {
-    id: string;
-    name: string;
-    role: string | null;
-    organization: string | null;
-    speaker_label: string | null;
+function StatCard({ label, value, color = "slate" }: { label: string; value: number | string; color?: string }) {
+  const colors: Record<string, string> = {
+    slate: "bg-slate-100 text-slate-700",
+    green: "bg-green-100 text-green-700",
+    red: "bg-red-100 text-red-700",
+    blue: "bg-blue-100 text-blue-700",
+    amber: "bg-amber-100 text-amber-700",
+    purple: "bg-purple-100 text-purple-700",
   };
-  meeting: {
-    id: string;
-    title: string;
-    summary: string | null;
-    created_at: string | null;
+
+  return (
+    <div className="rounded-2xl border bg-white p-5 shadow-sm">
+      <p className="text-sm text-slate-500">{label}</p>
+      <p className="mt-2 text-3xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function ProgressBar({ value, label, color = "emerald" }: { value: number; label: string; color?: string }) {
+  const colors: Record<string, string> = {
+    emerald: "bg-emerald-500",
+    red: "bg-red-500",
+    amber: "bg-amber-500",
+    blue: "bg-blue-500",
   };
-  statistics: {
-    total_tasks: number;
-    pending_tasks: number;
-    completed_tasks: number;
-    overdue_tasks: number;
-    meeting_decisions: number;
-  };
-  tasks: Task[];
-  meeting_decisions: Decision[];
-  requires_review: boolean;
-};
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-sm">
+        <span>{label}</span>
+        <span className="font-semibold">{value}%</span>
+      </div>
+      <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+        <div
+          className={`h-full rounded-full transition-all ${colors[color]}`}
+          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MeetingRow({ meeting }: { meeting: MeetingStat }) {
+  return (
+    <tr className="border-t border-slate-100 hover:bg-slate-50">
+      <td className="px-4 py-3">
+        <Link href={`/meetings/${meeting.meeting_id}`} className="font-medium text-blue-700 hover:underline">
+          {meeting.meeting_title}
+        </Link>
+      </td>
+      <td className="px-4 py-3 text-center">{meeting.total_commitments}</td>
+      <td className="px-4 py-3 text-center text-green-700">{meeting.completed}</td>
+      <td className="px-4 py-3 text-center text-red-700">{meeting.overdue}</td>
+      <td className="px-4 py-3 text-center font-semibold">{meeting.completion_rate}%</td>
+    </tr>
+  );
+}
+
+function WorkloadRow({ person }: { person: WorkloadStat }) {
+  return (
+    <tr className="border-t border-slate-100 hover:bg-slate-50">
+      <td className="px-4 py-3 font-medium">{person.person_name}</td>
+      <td className="px-4 py-3 text-center">{person.total_commitments}</td>
+      <td className="px-4 py-3 text-center text-green-700">{person.completed}</td>
+      <td className="px-4 py-3 text-center text-red-700">{person.overdue}</td>
+      <td className="px-4 py-3 text-center font-semibold">{person.completion_rate}%</td>
+    </tr>
+  );
+}
 
 export default function InsightsPage() {
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [meetingId, setMeetingId] = useState("");
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [participantId, setParticipantId] = useState("");
-  const [insights, setInsights] = useState<Insights | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingInsights, setLoadingInsights] = useState(false);
+  const [insights, setInsights] = useState<InsightsData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadMeetings = useCallback(async () => {
+  const loadInsights = useCallback(async () => {
     setLoading(true);
     setError("");
-
     try {
-      const response = await fetch(`${API}/api/meetings`);
-
-      if (!response.ok) {
-        throw new Error("Failed to load meetings.");
-      }
-
-      const data = await response.json();
-
-      const items: Meeting[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data.meetings)
-        ? data.meetings
-        : Array.isArray(data.items)
-        ? data.items
-        : [];
-
-      setMeetings(items);
-
-      if (items.length > 0) {
-        setMeetingId(items[0].id);
-      }
+      const response = await fetch(`${API}/api/insights/overview`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to load insights");
+      const data: InsightsData = await response.json();
+      setInsights(data);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load meetings."
-      );
+      setError(err instanceof Error ? err.message : "Failed to load insights");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadMeetings();
-  }, [loadMeetings]);
-
-  useEffect(() => {
-    if (!meetingId) {
-      setParticipants([]);
-      setParticipantId("");
-      setInsights(null);
-      return;
-    }
-
-    let active = true;
-
-    async function loadParticipants() {
-      setError("");
-      setParticipants([]);
-      setParticipantId("");
-      setInsights(null);
-
-      try {
-        const response = await fetch(
-          `${API}/api/participants/meeting/${meetingId}`
-        );
-
-        if (!response.ok) {
-          throw new Error("Failed to load participants.");
-        }
-
-        const data = await response.json();
-
-        const items: Participant[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data.participants)
-          ? data.participants
-          : [];
-
-        if (!active) return;
-
-        setParticipants(items);
-
-        if (items.length > 0) {
-          setParticipantId(items[0].id);
-        }
-      } catch (err) {
-        if (active) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load participants."
-          );
-        }
-      }
-    }
-
-    void loadParticipants();
-
-    return () => {
-      active = false;
-    };
-  }, [meetingId]);
-
-  useEffect(() => {
-    if (!participantId) {
-      setInsights(null);
-      return;
-    }
-
-    let active = true;
-
-    async function loadInsights() {
-      setLoadingInsights(true);
-      setError("");
-      setInsights(null);
-
-      try {
-        const response = await fetch(
-          `${API}/api/insights/participants/${participantId}`
-        );
-
-        if (!response.ok) {
-          throw new Error("Failed to load participant insights.");
-        }
-
-        const data: Insights = await response.json();
-
-        if (active) {
-          setInsights(data);
-        }
-      } catch (err) {
-        if (active) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load insights."
-          );
-        }
-      } finally {
-        if (active) {
-          setLoadingInsights(false);
-        }
-      }
-    }
-
     void loadInsights();
+  }, [loadInsights]);
 
-    return () => {
-      active = false;
-    };
-  }, [participantId]);
+  if (loading) {
+    return (
+      <main className="page-wrapper">
+        <div className="flex items-center justify-center h-64">
+          <p className="text-slate-500">Loading insights...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="page-wrapper">
+        <p role="alert" className="meeting-alert meeting-alert-error">{error}</p>
+      </main>
+    );
+  }
+
+  if (!insights) {
+    return (
+      <main className="page-wrapper">
+        <p className="text-slate-500">No data available.</p>
+      </main>
+    );
+  }
+
+  const { summary, meetings, workload } = insights;
 
   return (
-    <main className="mx-auto max-w-6xl space-y-8 px-6 py-10">
-      <header>
-        <Link
-          href="/"
-          className="text-sm text-blue-600 hover:underline"
-        >
-          ← Dashboard
-        </Link>
+    <main className="page-wrapper">
+      <Link href="/" className="back-link">
+        ← Dashboard
+      </Link>
 
-        <h1 className="mt-4 text-3xl font-bold">
-          Role-Specific Insights
-        </h1>
+      <h1>Cross-Meeting Insights</h1>
 
-        <p className="mt-2 text-gray-600">
-          View a participant's responsibilities, deadlines,
-          meeting context, and relevant decisions.
-        </p>
-      </header>
+      <p className="text-slate-500">
+        Overall completion rates, overdue tracking, and workload distribution across all meetings.
+      </p>
 
-      <section className="grid gap-5 rounded-xl border p-6 md:grid-cols-2">
-        <div>
-          <label
-            htmlFor="meeting"
-            className="mb-2 block font-semibold"
-          >
-            Meeting
-          </label>
-
-          <select
-            id="meeting"
-            value={meetingId}
-            onChange={(event) => setMeetingId(event.target.value)}
-            disabled={loading}
-            className="w-full rounded-lg border p-3 text-gray-900"
-          >
-            {meetings.length === 0 && (
-              <option value="">
-                {loading ? "Loading..." : "No meetings found"}
-              </option>
-            )}
-
-            {meetings.map((meeting) => (
-              <option key={meeting.id} value={meeting.id}>
-                {meeting.title}
-              </option>
-            ))}
-          </select>
+      {/* Summary Stats */}
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">OVERVIEW</span>
+            <h2>Summary Statistics</h2>
+          </div>
         </div>
-
-        <div>
-          <label
-            htmlFor="participant"
-            className="mb-2 block font-semibold"
-          >
-            Participant
-          </label>
-
-          <select
-            id="participant"
-            value={participantId}
-            onChange={(event) => setParticipantId(event.target.value)}
-            disabled={!participants.length}
-            className="w-full rounded-lg border p-3 text-gray-900"
-          >
-            {participants.length === 0 && (
-              <option value="">No participants available</option>
-            )}
-
-            {participants.map((participant) => (
-              <option key={participant.id} value={participant.id}>
-                {participant.name}
-                {participant.role ? ` — ${participant.role}` : ""}
-              </option>
-            ))}
-          </select>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6" style={{ marginTop: 16 }}>
+          <StatCard label="Total Commitments" value={summary.total_commitments} />
+          <StatCard label="Completed" value={summary.completed} color="green" />
+          <StatCard label="In Progress" value={summary.in_progress} color="blue" />
+          <StatCard label="Overdue" value={summary.overdue} color="red" />
+          <StatCard label="Unassigned" value={summary.unassigned} color="amber" />
+          <StatCard label="Total Meetings" value={summary.total_meetings} color="purple" />
         </div>
       </section>
 
-      {error && (
-        <p role="alert" className="text-red-600">
-          {error}
+      {/* Key Rates */}
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">RATES</span>
+            <h2>Key Rates</h2>
+          </div>
+        </div>
+        <div className="grid gap-6 md:grid-cols-2" style={{ marginTop: 16 }}>
+          <div>
+            <h3 className="font-semibold text-slate-700">Completion Rate</h3>
+            <ProgressBar value={summary.completion_rate} label={`${summary.completed} of ${summary.total_commitments - summary.cancelled} active commitments`} color="emerald" />
+            <p className="mt-2 text-sm text-slate-500">
+              {summary.cancelled} cancelled commitments excluded from rate calculation.
+            </p>
+          </div>
+          <div>
+            <h3 className="font-semibold text-slate-700">Overdue Rate</h3>
+            <ProgressBar value={summary.overdue_rate} label={`${summary.overdue} of ${summary.total_commitments - summary.cancelled} active commitments`} color="red" />
+            <p className="mt-2 text-sm text-slate-500">
+              Based on confirmed deadlines that have passed.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Workload Distribution */}
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">WORKLOAD</span>
+            <h2>Workload Distribution (by Person)</h2>
+          </div>
+        </div>
+        <p className="mt-2 text-sm text-slate-500">
+          Shows committed tasks per person across all meetings. Only includes people with linked identities.
         </p>
-      )}
+        {workload.length === 0 ? (
+          <p className="mt-4 text-slate-500">No workload data available. Link participants to people identities first.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3">Person</th>
+                  <th className="px-4 py-3 text-center">Total</th>
+                  <th className="px-4 py-3 text-center">Completed</th>
+                  <th className="px-4 py-3 text-center">Overdue</th>
+                  <th className="px-4 py-3 text-center">Completion Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workload.map((person) => (
+                  <WorkloadRow key={person.person_id} person={person} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
-      {loadingInsights && (
-        <p className="text-gray-500">
-          Loading participant insights...
+      {/* Meeting-wise Statistics */}
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">MEETINGS</span>
+            <h2>Meeting-Wise Statistics</h2>
+          </div>
+        </div>
+        <p className="mt-2 text-sm text-slate-500">
+          Commitment breakdown per meeting. Click a meeting title to view details.
         </p>
-      )}
-
-      {insights && (
-        <>
-          <section className="rounded-xl border p-6">
-            <h2 className="text-2xl font-bold">
-              {insights.participant.name}
-            </h2>
-
-            <p className="mt-2 text-gray-600">
-              Role: {insights.participant.role || "Not specified"}
-            </p>
-
-            {insights.participant.organization && (
-              <p className="text-gray-600">
-                Organization: {insights.participant.organization}
-              </p>
-            )}
-
-            <p className="mt-3 text-sm text-amber-700">
-              Meeting-specific insights. AI-extracted records may
-              require human verification.
-            </p>
-          </section>
-
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            {[
-              ["Total Tasks", insights.statistics.total_tasks],
-              ["Pending", insights.statistics.pending_tasks],
-              ["Completed", insights.statistics.completed_tasks],
-              ["Overdue", insights.statistics.overdue_tasks],
-              ["Meeting Decisions", insights.statistics.meeting_decisions],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="rounded-xl border p-5"
-              >
-                <p className="text-sm text-gray-500">{label}</p>
-                <p className="mt-2 text-3xl font-bold">{value}</p>
-              </div>
-            ))}
-          </section>
-
-          <section className="rounded-xl border p-6">
-            <h2 className="text-xl font-bold">Meeting Summary</h2>
-            <p className="mt-2 font-medium">
-              {insights.meeting.title}
-            </p>
-            <p className="mt-3 whitespace-pre-wrap text-gray-600">
-              {insights.meeting.summary ||
-                "No meeting summary available."}
-            </p>
-          </section>
-
-          <section className="space-y-4">
-            <h2 className="text-xl font-bold">
-              Assigned Action Items
-            </h2>
-
-            {insights.tasks.length === 0 && (
-              <p className="text-gray-500">
-                No assigned action items for this participant.
-              </p>
-            )}
-
-            {insights.tasks.map((task) => (
-              <article
-                key={task.id}
-                className="rounded-xl border p-5"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded bg-gray-100 px-3 py-1 text-sm text-gray-900">
-                    {task.status.replaceAll("_", " ")}
-                  </span>
-
-                  {task.overdue && (
-                    <span className="rounded bg-red-100 px-3 py-1 text-sm text-red-700">
-                      Overdue
-                    </span>
-                  )}
-
-                  <span className="rounded bg-amber-100 px-3 py-1 text-sm text-amber-800">
-                    Verification: {task.verification_status}
-                  </span>
-                </div>
-
-                <p className="mt-3 font-medium">{task.task}</p>
-
-                <p className="mt-2 text-sm text-gray-500">
-                  Deadline:{" "}
-                  {task.deadline ||
-                    task.deadline_text ||
-                    "Not specified"}
-                </p>
-              </article>
-            ))}
-          </section>
-
-          <section className="space-y-4">
-            <h2 className="text-xl font-bold">
-              Meeting Decisions
-            </h2>
-
-            <p className="text-sm text-gray-500">
-              These decisions belong to the selected meeting.
-              They are not necessarily attributed to this participant.
-            </p>
-
-            {insights.meeting_decisions.length === 0 && (
-              <p className="text-gray-500">
-                No current meeting decisions available.
-              </p>
-            )}
-
-            {insights.meeting_decisions.map((decision) => (
-              <article
-                key={decision.id}
-                className="rounded-xl border p-5"
-              >
-                <h3 className="font-semibold">{decision.title}</h3>
-
-                <p className="mt-2 whitespace-pre-wrap text-gray-600">
-                  {decision.description}
-                </p>
-
-                <p className="mt-3 text-sm text-gray-500">
-                  Status: {decision.status} · Verification:{" "}
-                  {decision.verification_status}
-                </p>
-              </article>
-            ))}
-          </section>
-        </>
-      )}
+        {meetings.length === 0 ? (
+          <p className="mt-4 text-slate-500">No meeting statistics available.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th className="px-4 py-3">Meeting</th>
+                  <th className="px-4 py-3 text-center">Total Commitments</th>
+                  <th className="px-4 py-3 text-center">Completed</th>
+                  <th className="px-4 py-3 text-center">Overdue</th>
+                  <th className="px-4 py-3 text-center">Completion Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {meetings.map((meeting) => (
+                  <MeetingRow key={meeting.meeting_id} meeting={meeting} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </main>
   );
 }

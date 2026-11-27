@@ -151,7 +151,7 @@ select:focus-visible {
    ========================================================= */
 
 .zoom-app {
-  display: flex;
+  display: block;
   min-height: 100vh;
   width: 100%;
   background: var(--background);
@@ -361,7 +361,7 @@ select:focus-visible {
 
   min-width: 0;
   min-height: 100vh;
-  margin-left: var(--sidebar-width);
+  width: 100%;
 }
 
 .zoom-topbar {
@@ -443,6 +443,30 @@ select:focus-visible {
   max-width: 1600px;
   margin: 0 auto;
   padding: 32px;
+  box-sizing: border-box;
+}
+
+/* Page wrapper for consistent layout with fixed sidebar */
+.page-wrapper {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 32px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1150px) {
+  .workspace-content,
+  .page-wrapper {
+    padding: 26px 23px;
+  }
+}
+
+@media (max-width: 700px) {
+  .workspace-content,
+  .page-wrapper {
+    padding: 21px 13px 35px;
+  }
 }
 
 .workspace-content h1,
@@ -2812,68 +2836,8 @@ select:focus-visible {
   }
 }
 
-/* Action Tracker: align content beside fixed sidebar */
-.zoom-app > .action-tracker-page {
-  flex: 1 1 auto;
-  width: calc(100% - var(--sidebar-width));
-  min-width: 0;
-  margin-left: var(--sidebar-width);
-}
-
-.action-tracker-page > .mx-auto {
-  width: 100%;
-}
-
-
-/* UNIFIED PAGE LAYOUT FIX */
-
-/* Fixed sidebar: reserve its width once at the app level */
-.zoom-app {
-  display: block;
+/* Action Tracker page wrapper */
+.action-tracker-page {
   min-height: 100vh;
-}
-
-.zoom-app > .zoom-sidebar {
-  position: fixed;
-}
-
-/* Every direct page receives the same available workspace */
-.zoom-app > :not(.zoom-sidebar) {
-  box-sizing: border-box;
-  display: block;
-  width: calc(100% - var(--sidebar-width));
-  max-width: none;
-  min-width: 0;
-  margin-left: var(--sidebar-width);
-}
-
-/* Dashboard already has an inner main element */
-.zoom-app > .dashboard-page > .zoom-main {
-  width: 100%;
-  min-width: 0;
-  margin-left: 0;
-}
-
-/* Full-width dashboard content */
-.dashboard-page .workspace-content {
-  width: 100%;
-  max-width: none;
-}
-
-/* Action Tracker: avoid double sidebar offsets */
-.zoom-app > .action-tracker-page {
-  margin-left: var(--sidebar-width);
-  width: calc(100% - var(--sidebar-width));
-}
-
-/* Prevent oversized content from forcing horizontal overflow */
-.zoom-app > :not(.zoom-sidebar) {
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 700px) {
-  .zoom-app > :not(.zoom-sidebar) {
-    width: calc(100% - var(--sidebar-width));
-    margin-left: var(--sidebar-width);
-  }
+  background: var(--background);
 }

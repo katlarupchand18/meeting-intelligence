@@ -17,6 +17,8 @@ from app.api.memory import router as memory_router
 from app.api.meeting_chat import router as meeting_chat_router
 from app.api.meetings import router as meetings_router
 from app.api.followups import router as followups_router
+from app.api.insights import router as insights_router
+from app.api.comparison import router as comparison_router
 from app.api.participants import router as participants_router
 from app.api.transcription import router as transcription_router
 from app.api.transcript_search import router as transcript_search_router
@@ -151,6 +153,16 @@ app.include_router(
 
 app.include_router(
     followups_router,
+    prefix=settings.API_V1_PREFIX,
+)
+
+app.include_router(
+    insights_router,
+    prefix=settings.API_V1_PREFIX,
+)
+
+app.include_router(
+    comparison_router,
     prefix=settings.API_V1_PREFIX,
 )
 

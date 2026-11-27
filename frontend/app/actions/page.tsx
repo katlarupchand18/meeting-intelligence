@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -160,7 +162,10 @@ function getTaskPriority(task: Commitment): TaskPriority {
   return "low";
 }
 
-export default function ActionsPage() {
+function ActionsPageContent() {
+  const searchParams = useSearchParams();
+  const personId = searchParams.get("person_id");
+
   const [tasks, setTasks] = useState<Commitment[]>([]);
   const [filter, setFilter] = useState("all");
   const [meetingFilter, setMeetingFilter] = useState("all");
@@ -176,12 +181,33 @@ export default function ActionsPage() {
   const [participants, setParticipants] = useState<
     Record<string, ParticipantOption[]>
   >({});
+  const [people, setPeople] = useState<Array<{id: string, display_name: string}>>([]);
+
+  const loadPeople = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/people`, { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        setPeople(data.people || []);
+      }
+    } catch (err) {
+      console.error('Failed to load people:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPeople();
+  }, [loadPeople]);
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API}/api/commitments/tracker`, {
+      let url = `${API}/api/commitments/tracker`;
+      if (personId) {
+        url = `${API}/api/commitments/tracker/person/${personId}`;
+      }
+      const response = await fetch(url, {
         cache: "no-store",
       });
       if (!response.ok) throw new Error(`Failed to load tasks (${response.status})`);
@@ -192,11 +218,18 @@ export default function ActionsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [personId]);
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
+
+  // Auto-select person in owner filter if person_id is in URL
+  useEffect(() => {
+    if (personId) {
+      setOwnerFilter(personId);
+    }
+  }, [personId]);
 
   async function updateField(
     task: Commitment,
@@ -410,7 +443,7 @@ export default function ActionsPage() {
       .map((row) => row.map(escapeCsv).join(","))
       .join("\r\n");
 
-    const blob = new Blob(["\uFEFF" + csv], {
+    const blob = new Blob(["﻿" + csv], {
       type: "text/csv;charset=utf-8",
     });
 
@@ -447,28 +480,37 @@ export default function ActionsPage() {
   const pendingCount = tasks.filter((task) => task.status === "open" && !isOverdue(task)).length;
 
   return (
-    <main className="action-tracker-page min-h-screen bg-slate-50 px-4 py-8 text-slate-900 sm:px-8">
-      <div className="mx-auto max-w-6xl">
-        <Link href="/" className="text-sm text-blue-700 hover:underline">
-          ← Back to Dashboard
-        </Link>
+    <main className="page-wrapper">
+      <Link href="/" className="back-link">
+        ← Dashboard
+      </Link>
 
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
+      <h1>Action Tracker</h1>
+
+      <p className="text-slate-500">
+        Track responsibilities and deadlines across your meetings.
+      </p>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center", justifyContent: "space-between", marginTop: 24 }}>
+        <div></div>
+        <button
+          onClick={() => void loadTasks()}
+          className="primary-button"
+          style={{ padding: "10px 16px", fontSize: 14 }}
+        >
+          Refresh
+        </button>
+      </div>
+
+      {/* Summary Stats */}
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
           <div>
-            <h1 className="text-3xl font-semibold">Action Tracker</h1>
-            <p className="mt-2 text-slate-500">
-              Track responsibilities and deadlines across your meetings.
-            </p>
+            <span className="eyebrow">OVERVIEW</span>
+            <h2>Summary Statistics</h2>
           </div>
-          <button
-            onClick={() => void loadTasks()}
-            className="rounded-xl border bg-white px-4 py-2 text-sm"
-          >
-            Refresh
-          </button>
         </div>
-
-        <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16, marginTop: 16 }}>
           {[
             ["Total Tasks", tasks.length],
             ["Pending", pendingCount],
@@ -481,17 +523,26 @@ export default function ActionsPage() {
             ["Medium Priority", mediumPriorityCount],
             ["Low Priority", lowPriorityCount],
           ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl border bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">{label}</p>
-              <p className="mt-2 text-3xl font-semibold">{value}</p>
+            <div key={label} style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, background: "#fff" }}>
+              <p style={{ fontSize: 13, color: "#64748b" }}>{label}</p>
+              <p style={{ marginTop: 8, fontSize: 28, fontWeight: 700 }}>{value}</p>
             </div>
           ))}
         </div>
+      </section>
 
-        <section className="mt-6 rounded-2xl border bg-white p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Completion progress</p>
-            <p className="text-sm text-slate-500">
+      {/* Completion Progress */}
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">PROGRESS</span>
+            <h2>Completion Progress</h2>
+          </div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <p style={{ fontWeight: 500 }}>Completion progress</p>
+            <p style={{ color: "#64748b" }}>
               {tasks.length
                 ? Math.round((completedCount / tasks.length) * 100)
                 : 0}%
@@ -507,11 +558,14 @@ export default function ActionsPage() {
                 ? Math.round((completedCount / tasks.length) * 100)
                 : 0
             }
-            className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200"
+            style={{ height: 10, borderRadius: 9999, background: "#e2e8f0", overflow: "hidden" }}
           >
             <div
-              className="h-full rounded-full bg-emerald-500 transition-all"
               style={{
+                height: "100%",
+                borderRadius: 9999,
+                background: "#10b981",
+                transition: "width 0.3s",
                 width: `${
                   tasks.length
                     ? Math.round((completedCount / tasks.length) * 100)
@@ -520,22 +574,55 @@ export default function ActionsPage() {
               }}
             />
           </div>
-        </section>
+        </div>
+      </section>
 
-        <div className="mt-8 flex flex-wrap gap-3">
+      {/* Filters */}
+      <section className="meeting-card" style={{ marginTop: 24 }}>
+        <div className="meeting-card-heading">
+          <div>
+            <span className="eyebrow">FILTERS</span>
+            <h2>Filter & Sort</h2>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 16 }}>
           <input
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search action items..."
             aria-label="Search action items"
-            className="min-w-0 flex-1 rounded-xl border bg-white px-4 py-3"
+            className="meeting-search"
+            style={{ minWidth: 200, flex: 1 }}
           />
+          <select
+            value={personId || ""}
+            onChange={(event) => {
+              const newPersonId = event.target.value;
+              if (newPersonId) {
+                window.location.href = `/actions?person_id=${newPersonId}`;
+              } else {
+                window.location.href = `/actions`;
+              }
+            }}
+            aria-label="Filter tasks by person"
+            className="meeting-search"
+            style={{ minWidth: 180 }}
+          >
+            <option value="">All people</option>
+            {people.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.display_name}
+              </option>
+            ))}
+          </select>
+
           <select
             value={meetingFilter}
             onChange={(event) => setMeetingFilter(event.target.value)}
             aria-label="Filter tasks by meeting"
-            className="rounded-xl border bg-white px-4 py-3"
+            className="meeting-search"
+            style={{ minWidth: 180 }}
           >
             <option value="all">All meetings</option>
             {meetingOptions.map(([id, title]) => (
@@ -549,7 +636,8 @@ export default function ActionsPage() {
             value={ownerFilter}
             onChange={(event) => setOwnerFilter(event.target.value)}
             aria-label="Filter tasks by owner"
-            className="rounded-xl border bg-white px-4 py-3"
+            className="meeting-search"
+            style={{ minWidth: 180 }}
           >
             <option value="all">All owners</option>
             <option value="unassigned">Unassigned</option>
@@ -564,7 +652,8 @@ export default function ActionsPage() {
             value={deadlineFilter}
             onChange={(event) => setDeadlineFilter(event.target.value)}
             aria-label="Filter tasks by deadline"
-            className="rounded-xl border bg-white px-4 py-3"
+            className="meeting-search"
+            style={{ minWidth: 160 }}
           >
             <option value="all">All deadlines</option>
             <option value="overdue">Overdue</option>
@@ -577,7 +666,8 @@ export default function ActionsPage() {
             value={priorityFilter}
             onChange={(event) => setPriorityFilter(event.target.value)}
             aria-label="Filter tasks by priority"
-            className="rounded-xl border bg-white px-4 py-3"
+            className="meeting-search"
+            style={{ minWidth: 160 }}
           >
             <option value="all">All priorities</option>
             <option value="high">High priority</option>
@@ -589,7 +679,8 @@ export default function ActionsPage() {
             value={sortBy}
             onChange={(event) => setSortBy(event.target.value)}
             aria-label="Sort tasks"
-            className="rounded-xl border bg-white px-4 py-3"
+            className="meeting-search"
+            style={{ minWidth: 160 }}
           >
             <option value="newest">Newest first</option>
             <option value="priority">Highest priority first</option>
@@ -602,7 +693,8 @@ export default function ActionsPage() {
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             aria-label="Filter tasks by status"
-            className="rounded-xl border bg-white px-4 py-3"
+            className="meeting-search"
+            style={{ minWidth: 160 }}
           >
             <option value="all">All statuses</option>
             <option value="active">Active tasks</option>
@@ -615,112 +707,152 @@ export default function ActionsPage() {
           </select>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setSearch("");
-            setFilter("all");
-            setMeetingFilter("all");
-            setSortBy("newest");
-            setOwnerFilter("all");
-            setDeadlineFilter("all");
-            setPriorityFilter("all");
-          }}
-          className="mt-3 text-sm text-blue-700 hover:underline"
-        >
-          Clear filters
-        </button>
-
-        <button
-          type="button"
-          onClick={exportTasksCsv}
-          disabled={visibleTasks.length === 0}
-          className="ml-4 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-        >
-          Export CSV
-        </button>
-
-        {success && (
-          <p
-            role="status"
-            className="mt-5 rounded-xl bg-green-50 p-4 text-green-700"
+        <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              setSearch("");
+              setFilter("all");
+              setMeetingFilter("all");
+              setSortBy("newest");
+              setOwnerFilter("all");
+              setDeadlineFilter("all");
+              setPriorityFilter("all");
+            }}
+            style={{
+              padding: "10px 16px",
+              border: "1px solid #cbd5e1",
+              borderRadius: 8,
+              background: "transparent",
+              cursor: "pointer",
+              fontSize: 14,
+            }}
           >
-            {success}
-          </p>
-        )}
+            Clear filters
+          </button>
 
-        <p className="mt-4 text-sm text-slate-500">
-          Showing {visibleTasks.length} of {tasks.length} tasks
+          <button
+            type="button"
+            onClick={exportTasksCsv}
+            disabled={visibleTasks.length === 0}
+            className="primary-button"
+            style={{ padding: "10px 16px", fontSize: 14, opacity: visibleTasks.length === 0 ? 0.5 : 1 }}
+          >
+            Export CSV
+          </button>
+        </div>
+      </section>
+
+      {success && (
+        <p role="status" className="meeting-alert meeting-alert-success" style={{ marginTop: 16 }}>
+          {success}
         </p>
+      )}
 
-        {savingId !== null && (
-          <p role="status" className="mt-2 text-sm text-blue-700">
-            Saving task changes...
-          </p>
-        )}
+      <p style={{ marginTop: 16, fontSize: 14, color: "#64748b" }}>
+        Showing {visibleTasks.length} of {tasks.length} tasks
+      </p>
 
-        {error && (
-          <p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-red-700">
-            {error}
-          </p>
-        )}
+      {savingId !== null && (
+        <p role="status" className="meeting-alert" style={{ marginTop: 12, background: "#eff6ff", borderColor: "#bfdbfe", color: "#1d4ed8" }}>
+          Saving task changes...
+        </p>
+      )}
 
-        {loading ? (
-          <p className="mt-10 text-slate-500">Loading action items...</p>
-        ) : visibleTasks.length === 0 ? (
-          <p className="mt-10 rounded-2xl border bg-white p-8 text-center text-slate-500">
-            No tasks match your current filters. Try clearing the filters.
-          </p>
-        ) : (
-          <div className="mt-6 space-y-4">
-            {visibleTasks.map((task) => (
-              <article key={task.id} className="rounded-2xl border bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        aria-label={`Task status: ${labels[task.status]}`}
-                        className={`rounded-full px-3 py-1 text-xs font-medium ${
-                          task.status === "completed"
-                            ? "bg-green-100 text-green-700"
-                            : task.status === "in_progress"
-                              ? "bg-blue-100 text-blue-700"
-                              : task.status === "blocked"
-                                ? "bg-orange-100 text-orange-700"
-                                : "bg-slate-100 text-slate-700"
-                        }`}
-                      >
-                        {labels[task.status]}
-                      </span>
-                    </div>
-                    <p className="mt-3 font-medium">{task.task}</p>
+      {error && (
+        <p role="alert" className="meeting-alert meeting-alert-error" style={{ marginTop: 16 }}>
+          {error}
+        </p>
+      )}
+
+      {loading ? (
+        <p className="text-slate-500 mt-8">Loading action items...</p>
+      ) : visibleTasks.length === 0 ? (
+        <p className="text-slate-500 mt-12 text-center">No tasks match your current filters. Try clearing the filters.</p>
+      ) : (
+        <section style={{ marginTop: 24 }}>
+          {visibleTasks.map((task) => (
+            <article key={task.id} className="meeting-card" style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 16 }}>
+                <div style={{ flex: 1, minWidth: 300 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                     <span
-                      className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium ${
-                        getTaskPriority(task) === "high"
-                          ? "bg-red-100 text-red-700"
-                          : getTaskPriority(task) === "medium"
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-slate-100 text-slate-600"
-                      }`}
+                      aria-label={`Task status: ${labels[task.status]}`}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 9999,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        background:
+                          task.status === "completed"
+                            ? "#dcfce7"
+                            : task.status === "in_progress"
+                            ? "#dbeafe"
+                            : task.status === "blocked"
+                            ? "#ffedd5"
+                            : "#f1f5f9",
+                        color:
+                          task.status === "completed"
+                            ? "#166534"
+                            : task.status === "in_progress"
+                            ? "#1d4ed8"
+                            : task.status === "blocked"
+                            ? "#9a3412"
+                            : "#475569",
+                      }}
                     >
-                      Priority: {getTaskPriority(task)}
+                      {labels[task.status]}
                     </span>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Deadline:
-                      <input
-                        type="date"
-                        aria-label={`Deadline for ${task.task}`}
-                        value={task.deadline || ""}
-                        disabled={savingId !== null}
-                        onChange={(event) =>
-                          void updateField(task, "deadline", event.target.value || null)
-                        }
-                        className="ml-2 rounded border px-2 py-1"
-                      />
-                    </p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      Owner:
-                      <select
+                  </div>
+                  <p style={{ fontSize: 18, fontWeight: 600 }}>{task.task}</p>
+                  <span
+                    style={{
+                      marginTop: 8,
+                      display: "inline-block",
+                      padding: "4px 10px",
+                      borderRadius: 9999,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background:
+                        getTaskPriority(task) === "high"
+                          ? "#fef2f2"
+                          : getTaskPriority(task) === "medium"
+                          ? "#fffbeb"
+                          : "#f1f5f9",
+                      color:
+                        getTaskPriority(task) === "high"
+                          ? "#991b1b"
+                          : getTaskPriority(task) === "medium"
+                          ? "#92400e"
+                          : "#64748b",
+                    }}
+                  >
+                    Priority: {getTaskPriority(task)}
+                  </span>
+                  <p style={{ marginTop: 10, fontSize: 14, color: "#64748b" }}>
+                    Deadline:
+                    <input
+                      type="date"
+                      aria-label={`Deadline for ${task.task}`}
+                      value={task.deadline || ""}
+                      disabled={savingId !== null}
+                      onChange={(event) =>
+                        void updateField(task, "deadline", event.target.value || null)
+                      }
+                      style={{
+                        marginLeft: 8,
+                        padding: "6px 10px",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 8,
+                        color: "inherit",
+                        background: "transparent",
+                        fontSize: 14,
+                      }}
+                    />
+                  </p>
+                  <p style={{ marginTop: 6, fontSize: 14, color: "#64748b" }}>
+                    Owner:
+                    <select
                       value={task.owner_id || ""}
                       onFocus={() => void loadParticipants(task.meeting_id)}
                       onChange={(event) =>
@@ -732,7 +864,15 @@ export default function ActionsPage() {
                       }
                       disabled={savingId !== null}
                       aria-label={`Owner for ${task.task}`}
-                      className="rounded-lg border px-3 py-2 disabled:opacity-50"
+                      style={{
+                        marginLeft: 8,
+                        padding: "8px 12px",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 8,
+                        color: "inherit",
+                        background: "transparent",
+                        fontSize: 14,
+                      }}
                     >
                       <option value="">Unassigned</option>
                       {task.owner_id &&
@@ -749,63 +889,86 @@ export default function ActionsPage() {
                         </option>
                       ))}
                     </select>
-                    </p>
-                    <div className="mt-3 flex items-center gap-3">
-                      <Link
-                        href={`/meetings/${task.meeting_id}`}
-                        className="text-sm text-blue-700 hover:underline"
-                      >
-                        {task.meeting_title || "View source meeting"}
-                      </Link>
-                      {deadlineUrgency(task) && (
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs ${
-                            deadlineUrgency(task) === "Overdue"
-                              ? "bg-red-100 text-red-700"
-                              : deadlineUrgency(task) === "Due Today"
-                                ? "bg-orange-100 text-orange-700"
-                                : "bg-amber-100 text-amber-700"
-                          }`}
-                        >
-                          {deadlineUrgency(task)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-start gap-3">
-                    <button
-                      type="button"
-                      disabled={savingId !== null}
-                      onClick={() => {
-                        if (
-                          task.status === "completed" &&
-                          !window.confirm(
-                            "Reopen this completed task?"
-                          )
-                        ) {
-                          return;
-                        }
-                        void updateStatus(
-                          task,
-                          task.status === "completed" ? "open" : "completed"
-                        );
-                      }}
-                      className={`rounded-lg px-3 py-2 text-sm font-medium ${
-                        task.status === "completed"
-                          ? "bg-slate-100 text-slate-700"
-                          : "bg-emerald-600 text-white"
-                      } disabled:opacity-50`}
+                  </p>
+                  <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <Link
+                      href={`/meetings/${task.meeting_id}`}
+                      style={{ fontSize: 14, color: "#2563eb" }}
                     >
-                      {savingId === task.id
-                        ? "Saving..."
-                        : task.status === "completed"
-                          ? "Reopen Task"
-                          : "Mark Complete"}
-                    </button>
+                      {task.meeting_title || "View source meeting"}
+                    </Link>
+                    {deadlineUrgency(task) && (
+                      <span
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 9999,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          background:
+                            deadlineUrgency(task) === "Overdue"
+                              ? "#fef2f2"
+                              : deadlineUrgency(task) === "Due Today"
+                              ? "#fff7ed"
+                              : "#fffbeb",
+                          color:
+                            deadlineUrgency(task) === "Overdue"
+                              ? "#991b1b"
+                              : deadlineUrgency(task) === "Due Today"
+                              ? "#9a3412"
+                              : "#92400e",
+                        }}
+                      >
+                        {deadlineUrgency(task)}
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-                    <div>
-                    <label htmlFor={`status-${task.id}`} className="mb-1 block text-xs text-slate-500">
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 200 }}>
+                  <button
+                    type="button"
+                    disabled={savingId !== null}
+                    onClick={() => {
+                      if (
+                        task.status === "completed" &&
+                        !window.confirm(
+                          "Reopen this completed task?"
+                        )
+                      ) {
+                        return;
+                      }
+                      void updateStatus(
+                        task,
+                        task.status === "completed" ? "open" : "completed"
+                      );
+                    }}
+                    style={{
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      cursor: savingId !== null ? "wait" : "pointer",
+                      background:
+                        task.status === "completed"
+                          ? "#f1f5f9"
+                          : "#10b981",
+                      color:
+                        task.status === "completed"
+                          ? "#475569"
+                          : "#fff",
+                      border: "none",
+                      opacity: savingId !== null ? 0.6 : 1,
+                    }}
+                  >
+                    {savingId === task.id
+                      ? "Saving..."
+                      : task.status === "completed"
+                      ? "Reopen Task"
+                      : "Mark Complete"}
+                  </button>
+
+                  <div>
+                    <label htmlFor={`status-${task.id}`} style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 4 }}>
                       Status
                     </label>
                     <select
@@ -815,7 +978,8 @@ export default function ActionsPage() {
                       onChange={(event) =>
                         void updateStatus(task, event.target.value as Status)
                       }
-                      className="rounded-lg border bg-white px-3 py-2 text-sm"
+                      className="meeting-search"
+                      style={{ padding: "8px 12px", fontSize: 14 }}
                     >
                       {statuses.map((status) => (
                         <option key={status} value={status}>
@@ -823,14 +987,21 @@ export default function ActionsPage() {
                         </option>
                       ))}
                     </select>
-                    </div>
                   </div>
                 </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </div>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
     </main>
+  );
+}
+
+export default function ActionsPage() {
+  return (
+    <Suspense fallback={<main style={{ padding: 32 }}>Loading action tracker...</main>}>
+      <ActionsPageContent />
+    </Suspense>
   );
 }

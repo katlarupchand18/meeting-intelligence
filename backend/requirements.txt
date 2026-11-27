@@ -24,3 +24,14 @@ python-jose[cryptography]
 passlib[bcrypt]
 
 scikit-learn
+
+# NLP dependencies
+spacy
+spacy-transformers
+
+# Groq client
+groq
+
+# Text processing
+python-dateutil
+regex

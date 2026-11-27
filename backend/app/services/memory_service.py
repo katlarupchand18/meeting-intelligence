@@ -52,7 +52,7 @@ class MemoryService:
         db: Session,
         query: str,
         limit: int = 10,
-        similarity_threshold: float = 0.70,
+        similarity_threshold: float = 0.35,
         meeting_id: UUID | None = None,
     ) -> MemorySearchResponse:
         rows = await embedding_service.search(
